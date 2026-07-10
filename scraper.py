@@ -361,11 +361,27 @@ def parse_args(argv: list[str] | None = None):
     p.add_argument("--seed-send", action="store_true",
                    help="On a first/empty run, email the current batch instead of "
                         "silently seeding it.")
+    p.add_argument("--test-email", action="store_true",
+                   help="Send a single sample email to verify SMTP/Gmail setup, "
+                        "then exit. Touches nothing else.")
     return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+
+    if args.test_email:
+        log("Test-email mode: sending one sample posting to verify SMTP setup.", "EMAIL")
+        sample = [{
+            "company": "Test Company",
+            "title": "Sample SWE Intern (delivery test)",
+            "location": "Remote",
+            "url": "https://github.com/thung19/job-hunter",
+        }]
+        send_email(sample)
+        log("Test email sent. Check your inbox (and spam folder).", "EMAIL")
+        return 0
+
     force = args.force or os.environ.get("FORCE_RUN") == "1"
     now_et = datetime.now(EASTERN)
     log(f"Run start. Eastern time = {now_et:%Y-%m-%d %H:%M:%S %Z}, "

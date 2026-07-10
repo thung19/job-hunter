@@ -15,6 +15,10 @@ on:
         description: "Dry run: show what would send, don't email or update seen.json"
         type: boolean
         default: false
+      test_email:
+        description: "Send a single sample email to verify Gmail setup, then exit"
+        type: boolean
+        default: false
 
 # Allow the workflow to commit the updated seen.json back to the repo.
 permissions:
@@ -46,7 +50,9 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           FORCE_RUN: ${{ github.event.inputs.force == 'true' && '1' || '0' }}
         run: |
-          python scraper.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+          python scraper.py \
+            ${{ github.event.inputs.test_email == 'true' && '--test-email' || '' }} \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       - name: Persist seen.json
         run: |
