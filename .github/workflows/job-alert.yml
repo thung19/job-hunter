@@ -1,0 +1,61 @@
+name: Job Alert
+
+on:
+  schedule:
+    # GitHub cron is UTC only. We trigger hourly and let scraper.py decide
+    # (via zoneinfo America/New_York) whether the Eastern hour is 8/12/16/20.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run now regardless of the Eastern-time gate"
+        type: boolean
+        default: true
+      dry_run:
+        description: "Dry run: show what would send, don't email or update seen.json"
+        type: boolean
+        default: false
+
+# Allow the workflow to commit the updated seen.json back to the repo.
+permissions:
+  contents: write
+
+concurrency:
+  group: job-alert
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run scraper
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          FORCE_RUN: ${{ github.event.inputs.force == 'true' && '1' || '0' }}
+        run: |
+          python scraper.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      - name: Persist seen.json
+        run: |
+          if [[ -n "$(git status --porcelain seen.json)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add seen.json
+            git commit -m "chore: update seen postings [skip ci]"
+            git push
+          else
+            echo "seen.json unchanged; nothing to commit."
+          fi

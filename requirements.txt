@@ -1,0 +1,2 @@
+# scraper.py uses only the Python 3.9+ standard library (urllib, json, re,
+# smtplib, email, zoneinfo). No third-party packages are required.
