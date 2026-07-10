@@ -61,14 +61,27 @@ MARKDOWN_SOURCES = [
      "title_filter": True},
 ]
 
-# Keywords used to decide SWE relevance when title filtering is required.
-SWE_KEYWORDS = [
+# Category substrings (JSON sources) that count as relevant. Matched against
+# SimplifyJobs-style categories: "Software", "Software Engineering",
+# "AI/ML/Data", "Data Science, AI & Machine Learning", "Quant",
+# "Quantitative Finance" all match; "Hardware"/"Product" do not.
+CATEGORY_KEYWORDS = ["software", "ai", "machine learning", "quant", "data science"]
+
+# Keywords used to decide relevance when title filtering is required
+# (markdown sources, and JSON sources with no category field). Covers
+# software engineering, AI/ML, and quant roles.
+RELEVANT_KEYWORDS = [
     "software", "swe", "developer", "programming", "full stack", "full-stack",
     "fullstack", "backend", "back-end", "back end", "frontend", "front-end",
     "front end", "web", "mobile", "ios", "android", "devops", "site reliability",
     "sre", "data engineer", "machine learning", "ml engineer", "ai engineer",
     "computer vision", "embedded software", "firmware", "platform engineer",
     "systems engineer", "cloud", "security engineer", "qa", "sdet", "test engineer",
+    # AI/ML
+    "artificial intelligence", "deep learning", "nlp", "llm", "data scientist",
+    "data science", "research engineer", "applied scientist", "ai researcher",
+    # Quant
+    "quant", "quantitative", "algo trading", "algorithmic trading",
 ]
 
 # Matches BOTH markdown links [text](url) AND raw HTML <a href="url">text</a>.
@@ -184,7 +197,7 @@ def parse_markdown_table(text: str, title_filter: bool) -> list[dict]:
         table_rows += 1
         location = cell_text(cells[2]) if len(cells) > 2 else ""
 
-        if title_filter and not is_swe_title(title):
+        if title_filter and not is_relevant_title(title):
             kw_dropped += 1
             continue
 
@@ -195,7 +208,7 @@ def parse_markdown_table(text: str, title_filter: bool) -> list[dict]:
             "location": location,
             "url": apply_url,
         })
-    kw_note = f", dropped {kw_dropped} non-SWE title" if title_filter else ""
+    kw_note = f", dropped {kw_dropped} non-relevant title" if title_filter else ""
     log(f"  parsed {table_rows} table rows -> kept {len(results)}{kw_note}", "PARSE")
     return results
 
@@ -210,14 +223,14 @@ def parse_json_source(text: str) -> list[dict]:
             continue
         category = item.get("category")
         if category:
-            # Spec'd path: structured category field -> filter on "Software".
-            if "software" not in category.lower():
+            # Structured category field -> filter on Software/AI/Quant categories.
+            if not any(kw in category.lower() for kw in CATEGORY_KEYWORDS):
                 dropped["category"] += 1
                 continue
         else:
             # Some repos (e.g. vanshb03) omit category entirely; fall back to
-            # keyword-filtering the title for SWE relevance.
-            if not is_swe_title(item.get("title") or ""):
+            # keyword-filtering the title for relevance.
+            if not is_relevant_title(item.get("title") or ""):
                 dropped["keyword"] += 1
                 continue
         listing_id = item.get("id")
@@ -232,15 +245,15 @@ def parse_json_source(text: str) -> list[dict]:
             "location": ", ".join(locations) if isinstance(locations, list) else str(locations),
             "url": item.get("url") or "",
         })
-    log(f"  parsed {len(data)} items -> kept {len(results)} SWE "
-        f"(dropped: {dropped['inactive']} inactive, {dropped['category']} non-software cat, "
-        f"{dropped['keyword']} non-SWE title, {dropped['no_id']} missing id)", "PARSE")
+    log(f"  parsed {len(data)} items -> kept {len(results)} relevant "
+        f"(dropped: {dropped['inactive']} inactive, {dropped['category']} irrelevant cat, "
+        f"{dropped['keyword']} irrelevant title, {dropped['no_id']} missing id)", "PARSE")
     return results
 
 
-def is_swe_title(title: str) -> bool:
+def is_relevant_title(title: str) -> bool:
     t = title.lower()
-    return any(kw in t for kw in SWE_KEYWORDS)
+    return any(kw in t for kw in RELEVANT_KEYWORDS)
 
 
 # --------------------------------------------------------------------------- #
