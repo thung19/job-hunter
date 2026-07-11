@@ -3,9 +3,9 @@
 Automated SWE internship/job alert emailer.
 
 Runs on an hourly GitHub Actions cron. On each run it:
-  1. Checks whether the current US-Eastern hour is one of {8, 12, 16, 20};
-     if not, exits immediately (GitHub cron is UTC-only, so we gate here
-     using zoneinfo which handles EST/EDT automatically).
+  1. Checks whether the current US-Eastern hour is within SEND_HOURS_ET
+     (8am-10pm ET); if not, exits immediately (GitHub cron is UTC-only, so
+     we gate here using zoneinfo which handles EST/EDT automatically).
   2. Fetches JSON + Markdown-table job sources.
   3. Parses, filters for SWE relevance, and dedupes against seen.json.
   4. Emails any brand-new postings, then records them in seen.json.
@@ -33,7 +33,8 @@ from zoneinfo import ZoneInfo
 # Configuration
 # --------------------------------------------------------------------------- #
 
-SEND_HOURS_ET = {8, 12, 16, 20}
+# Every hour from 8am through 10pm ET, inclusive.
+SEND_HOURS_ET = set(range(8, 23))
 EASTERN = ZoneInfo("America/New_York")
 
 SEEN_FILE = Path(__file__).parent / "seen.json"

@@ -1,16 +1,16 @@
 # Job Hunter — automated SWE posting emailer
 
-Emails you brand-new software-engineering internship/job postings **four times a
-day** (8am, 12pm, 4pm, 8pm US Eastern) and never re-sends anything you've already
-seen. Runs entirely on GitHub Actions' free tier — no machine of yours needs to
-be on.
+Emails you brand-new software-engineering, AI/ML, and Quant internship/job
+postings **every hour from 8am to 10pm US Eastern** and never re-sends anything
+you've already seen. Runs entirely on GitHub Actions' free tier — no machine of
+yours needs to be on.
 
 ## How it works
 
 - **Schedule:** GitHub cron fires hourly (UTC). `scraper.py` uses
-  `zoneinfo("America/New_York")` to check whether the current Eastern hour is one
-  of `{8, 12, 16, 20}`; if not, it exits immediately. This tracks EST/EDT
-  automatically.
+  `zoneinfo("America/New_York")` to check whether the current Eastern hour is in
+  `SEND_HOURS_ET` (8am-10pm, i.e. `{8, 9, ..., 22}`); outside that window it
+  exits immediately. This tracks EST/EDT automatically.
 - **Sources:** two JSON feeds + five markdown-table READMEs (see `scraper.py`).
 - **Dedup:** JSON listings dedupe on their `id`; markdown listings dedupe on the
   extracted apply URL. Seen keys are stored in `seen.json`, which the workflow
