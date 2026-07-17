@@ -62,6 +62,79 @@ MARKDOWN_SOURCES = [
      "title_filter": True},
 ]
 
+# Direct company career-page sources via public ATS APIs (no scraping required).
+# All slugs below are live-verified. To add a company: visit its job board URL
+# and look for the slug in boards.greenhouse.io/{slug}, jobs.lever.co/{slug},
+# jobs.ashbyhq.com/{slug}, or api.ashbyhq.com/posting-api/job-board/{slug}.
+#
+# Greenhouse: https://boards-api.greenhouse.io/v1/boards/{slug}/jobs
+GREENHOUSE_COMPANIES = {
+    # Fintech / payments
+    "stripe":      "Stripe",
+    "brex":        "Brex",
+    "coinbase":    "Coinbase",
+    "gusto":       "Gusto",
+    "robinhood":   "Robinhood",
+    "sofi":        "SoFi",
+    "toast":       "Toast",
+    # Productivity / collaboration
+    "figma":       "Figma",
+    "asana":       "Asana",
+    "squarespace": "Squarespace",
+    "hubspot":     "HubSpot",
+    "coursera":    "Coursera",
+    "elastic":     "Elastic",
+    # Social / consumer
+    "discord":     "Discord",
+    "reddit":      "Reddit",
+    "duolingo":    "Duolingo",
+    "lyft":        "Lyft",
+    "instacart":   "Instacart",
+    "airbnb":      "Airbnb",
+    "roblox":      "Roblox",
+    "pinterest":   "Pinterest",
+    # Cloud / infra / data / AI
+    "cloudflare":  "Cloudflare",
+    "databricks":  "Databricks",
+    "gitlab":      "GitLab",
+    "flexport":    "Flexport",
+    "mongodb":     "MongoDB",
+    "datadog":     "Datadog",
+    "scaleai":     "Scale AI",
+}
+
+# Lever: https://api.lever.co/v0/postings/{slug}?mode=json
+LEVER_COMPANIES = {
+    "openai":   "OpenAI",
+    "palantir": "Palantir",
+    "spotify":  "Spotify",
+    "waymo":    "Waymo",
+}
+
+# Ashby HQ: https://api.ashbyhq.com/posting-api/job-board/{slug}
+# Many fast-growing startups use Ashby instead of Greenhouse/Lever.
+ASHBY_COMPANIES = {
+    "ramp":        "Ramp",
+    "notion":      "Notion",
+    "plaid":       "Plaid",
+    "benchling":   "Benchling",
+    "snowflake":   "Snowflake",
+}
+
+# Companies that run their own career JSON APIs (not Greenhouse/Lever/Ashby).
+# Note: Amazon, Meta, Apple, Microsoft, NVIDIA etc. use Workday/SPAs that
+# require a headless browser and are not listed here.
+CAREER_API_SOURCES = [
+    {
+        "name": "Google",
+        "type": "google",
+        "urls": [
+            "https://careers.google.com/api/v3/search/?q=software+engineer+intern&page_size=20",
+            "https://careers.google.com/api/v3/search/?q=software+engineer&location=United+States&page_size=20",
+        ],
+    },
+]
+
 # Category substrings (JSON sources) that count as relevant. Matched against
 # SimplifyJobs-style categories: "Software", "Software Engineering",
 # "AI/ML/Data", "Data Science, AI & Machine Learning", "Quant",
@@ -257,6 +330,129 @@ def is_relevant_title(title: str) -> bool:
     return any(kw in t for kw in RELEVANT_KEYWORDS)
 
 
+def parse_google_careers(text: str) -> list[dict]:
+    """Parse Google Careers API JSON response."""
+    results = []
+    data = json.loads(text)
+    jobs = data.get("jobs") or []
+    dropped_kw = 0
+    for job in jobs:
+        title = job.get("title") or ""
+        if not is_relevant_title(title):
+            dropped_kw += 1
+            continue
+        job_id = job.get("job_id") or ""
+        if not job_id:
+            continue
+        locations = job.get("locations") or []
+        location = ", ".join(
+            loc.get("display", "") for loc in locations if loc.get("display")
+        )
+        apply_url = job.get("apply_url") or ""
+        results.append({
+            "key": f"google:{job_id}",
+            "company": "Google",
+            "title": title,
+            "location": location,
+            "url": apply_url,
+        })
+    log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
+        f"(dropped {dropped_kw} non-relevant title)", "PARSE")
+    return results
+
+
+def parse_greenhouse_source(text: str, company: str) -> list[dict]:
+    """Parse a Greenhouse boards API response (boards-api.greenhouse.io)."""
+    results = []
+    data = json.loads(text)
+    jobs = data.get("jobs") or []
+    dropped_kw = 0
+    for job in jobs:
+        title = job.get("title") or ""
+        if not is_relevant_title(title):
+            dropped_kw += 1
+            continue
+        job_id = job.get("id")
+        if not job_id:
+            continue
+        location = (job.get("location") or {}).get("name") or ""
+        url = job.get("absolute_url") or ""
+        results.append({
+            "key": f"gh:{job_id}",
+            "company": company,
+            "title": title,
+            "location": location,
+            "url": url,
+        })
+    log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
+        f"(dropped {dropped_kw} non-relevant title)", "PARSE")
+    return results
+
+
+def parse_lever_source(text: str, company: str) -> list[dict]:
+    """Parse a Lever public postings API response (api.lever.co)."""
+    results = []
+    jobs = json.loads(text)
+    if not isinstance(jobs, list):
+        jobs = []
+    dropped_kw = 0
+    for job in jobs:
+        title = job.get("text") or ""
+        if not is_relevant_title(title):
+            dropped_kw += 1
+            continue
+        job_id = job.get("id")
+        if not job_id:
+            continue
+        cats = job.get("categories") or {}
+        location = cats.get("location") or ""
+        url = job.get("hostedUrl") or job.get("applyUrl") or ""
+        results.append({
+            "key": f"lever:{job_id}",
+            "company": company,
+            "title": title,
+            "location": location,
+            "url": url,
+        })
+    log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
+        f"(dropped {dropped_kw} non-relevant title)", "PARSE")
+    return results
+
+
+def parse_ashby_source(text: str, company: str) -> list[dict]:
+    """Parse an Ashby HQ job board API response (api.ashbyhq.com)."""
+    results = []
+    data = json.loads(text)
+    jobs = data.get("jobs") or []
+    dropped_kw = dropped_unlisted = 0
+    for job in jobs:
+        if not job.get("isListed", True):
+            dropped_unlisted += 1
+            continue
+        title = job.get("title") or ""
+        if not is_relevant_title(title):
+            dropped_kw += 1
+            continue
+        job_id = job.get("id") or ""
+        if not job_id:
+            continue
+        addr = (job.get("address") or {}).get("postalAddress") or {}
+        city   = addr.get("addressLocality") or ""
+        region = addr.get("addressRegion") or ""
+        location = f"{city}, {region}".strip(", ") if city or region else (job.get("location") or "")
+        url = job.get("jobUrl") or ""
+        results.append({
+            "key": f"ashby:{job_id}",
+            "company": company,
+            "title": title,
+            "location": location,
+            "url": url,
+        })
+    log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
+        f"(dropped {dropped_kw} non-relevant, {dropped_unlisted} unlisted)", "PARSE")
+    return results
+
+
 # --------------------------------------------------------------------------- #
 # Seen-state persistence
 # --------------------------------------------------------------------------- #
@@ -345,20 +541,62 @@ def send_email(postings: list[dict]) -> None:
 
 def gather_listings() -> list[dict]:
     listings: list[dict] = []
-    total = len(JSON_SOURCES) + len(MARKDOWN_SOURCES)
-    for i, url in enumerate(JSON_SOURCES, 1):
-        log(f"Source {i}/{total} (JSON): {url.split('/')[4]}", "SOURCE")
+    career_api_url_count = sum(len(s["urls"]) for s in CAREER_API_SOURCES)
+    total = (len(JSON_SOURCES) + len(MARKDOWN_SOURCES)
+             + len(GREENHOUSE_COMPANIES) + len(LEVER_COMPANIES)
+             + len(ASHBY_COMPANIES) + career_api_url_count)
+    idx = 0
+    for url in JSON_SOURCES:
+        idx += 1
+        log(f"Source {idx}/{total} (JSON): {url.split('/')[4]}", "SOURCE")
         try:
             listings += parse_json_source(fetch(url))
         except Exception as e:  # noqa: BLE001 - one bad source shouldn't kill the run
             log(f"JSON source failed {url}: {e}", "WARN")
-    for j, src in enumerate(MARKDOWN_SOURCES, len(JSON_SOURCES) + 1):
-        log(f"Source {j}/{total} (MD, title_filter={src['title_filter']}): "
+    for src in MARKDOWN_SOURCES:
+        idx += 1
+        log(f"Source {idx}/{total} (MD, title_filter={src['title_filter']}): "
             f"{src['url'].split('/')[4]}", "SOURCE")
         try:
             listings += parse_markdown_table(fetch(src["url"]), src["title_filter"])
         except Exception as e:  # noqa: BLE001
             log(f"Markdown source failed {src['url']}: {e}", "WARN")
+    for slug, name in GREENHOUSE_COMPANIES.items():
+        idx += 1
+        log(f"Source {idx}/{total} (Greenhouse): {name}", "SOURCE")
+        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+        try:
+            listings += parse_greenhouse_source(fetch(url), name)
+        except Exception as e:  # noqa: BLE001
+            log(f"Greenhouse source failed {slug}: {e}", "WARN")
+    for slug, name in LEVER_COMPANIES.items():
+        idx += 1
+        log(f"Source {idx}/{total} (Lever): {name}", "SOURCE")
+        url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
+        try:
+            listings += parse_lever_source(fetch(url), name)
+        except Exception as e:  # noqa: BLE001
+            log(f"Lever source failed {slug}: {e}", "WARN")
+    for slug, name in ASHBY_COMPANIES.items():
+        idx += 1
+        log(f"Source {idx}/{total} (Ashby): {name}", "SOURCE")
+        url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
+        try:
+            listings += parse_ashby_source(fetch(url), name)
+        except Exception as e:  # noqa: BLE001
+            log(f"Ashby source failed {slug}: {e}", "WARN")
+    for src in CAREER_API_SOURCES:
+        for url in src["urls"]:
+            idx += 1
+            log(f"Source {idx}/{total} (Career API): {src['name']} — {url.split('?')[0].split('/')[-1] or src['name']}", "SOURCE")
+            try:
+                raw = fetch(url)
+                if src["type"] == "google":
+                    listings += parse_google_careers(raw)
+                else:
+                    log(f"Unknown career API type '{src['type']}' for {src['name']}", "WARN")
+            except Exception as e:  # noqa: BLE001
+                log(f"Career API source failed {src['name']} ({url}): {e}", "WARN")
     return listings
 
 
