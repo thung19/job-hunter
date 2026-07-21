@@ -330,16 +330,32 @@ def is_relevant_title(title: str) -> bool:
     return any(kw in t for kw in RELEVANT_KEYWORDS)
 
 
+# Matches internship / co-op titles. Word-boundaried so "Internal Audit" and
+# "International Tax" do NOT false-positive, while "Intern", "Internship",
+# "Interns", "Co-op", "Coop" all do. Applied to the company ATS + career-API
+# sources, which return full-time roles alongside interns; the dedicated
+# internship repos (JSON + markdown sources) are already intern-only by
+# construction, so they are trusted as-is.
+INTERN_RE = re.compile(r"\bintern(ship)?s?\b|\bco-?ops?\b", re.IGNORECASE)
+
+
+def is_intern_title(title: str) -> bool:
+    return bool(INTERN_RE.search(title))
+
+
 def parse_google_careers(text: str) -> list[dict]:
     """Parse Google Careers API JSON response."""
     results = []
     data = json.loads(text)
     jobs = data.get("jobs") or []
-    dropped_kw = 0
+    dropped_kw = dropped_notintern = 0
     for job in jobs:
         title = job.get("title") or ""
         if not is_relevant_title(title):
             dropped_kw += 1
+            continue
+        if not is_intern_title(title):
+            dropped_notintern += 1
             continue
         job_id = job.get("job_id") or ""
         if not job_id:
@@ -357,7 +373,7 @@ def parse_google_careers(text: str) -> list[dict]:
             "url": apply_url,
         })
     log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
-        f"(dropped {dropped_kw} non-relevant title)", "PARSE")
+        f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern)", "PARSE")
     return results
 
 
@@ -366,11 +382,14 @@ def parse_greenhouse_source(text: str, company: str) -> list[dict]:
     results = []
     data = json.loads(text)
     jobs = data.get("jobs") or []
-    dropped_kw = 0
+    dropped_kw = dropped_notintern = 0
     for job in jobs:
         title = job.get("title") or ""
         if not is_relevant_title(title):
             dropped_kw += 1
+            continue
+        if not is_intern_title(title):
+            dropped_notintern += 1
             continue
         job_id = job.get("id")
         if not job_id:
@@ -385,7 +404,7 @@ def parse_greenhouse_source(text: str, company: str) -> list[dict]:
             "url": url,
         })
     log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
-        f"(dropped {dropped_kw} non-relevant title)", "PARSE")
+        f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern)", "PARSE")
     return results
 
 
@@ -395,11 +414,14 @@ def parse_lever_source(text: str, company: str) -> list[dict]:
     jobs = json.loads(text)
     if not isinstance(jobs, list):
         jobs = []
-    dropped_kw = 0
+    dropped_kw = dropped_notintern = 0
     for job in jobs:
         title = job.get("text") or ""
         if not is_relevant_title(title):
             dropped_kw += 1
+            continue
+        if not is_intern_title(title):
+            dropped_notintern += 1
             continue
         job_id = job.get("id")
         if not job_id:
@@ -415,7 +437,7 @@ def parse_lever_source(text: str, company: str) -> list[dict]:
             "url": url,
         })
     log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
-        f"(dropped {dropped_kw} non-relevant title)", "PARSE")
+        f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern)", "PARSE")
     return results
 
 
@@ -424,7 +446,7 @@ def parse_ashby_source(text: str, company: str) -> list[dict]:
     results = []
     data = json.loads(text)
     jobs = data.get("jobs") or []
-    dropped_kw = dropped_unlisted = 0
+    dropped_kw = dropped_unlisted = dropped_notintern = 0
     for job in jobs:
         if not job.get("isListed", True):
             dropped_unlisted += 1
@@ -432,6 +454,9 @@ def parse_ashby_source(text: str, company: str) -> list[dict]:
         title = job.get("title") or ""
         if not is_relevant_title(title):
             dropped_kw += 1
+            continue
+        if not is_intern_title(title):
+            dropped_notintern += 1
             continue
         job_id = job.get("id") or ""
         if not job_id:
@@ -449,7 +474,8 @@ def parse_ashby_source(text: str, company: str) -> list[dict]:
             "url": url,
         })
     log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
-        f"(dropped {dropped_kw} non-relevant, {dropped_unlisted} unlisted)", "PARSE")
+        f"(dropped {dropped_kw} non-relevant, {dropped_notintern} non-intern, "
+        f"{dropped_unlisted} unlisted)", "PARSE")
     return results
 
 
