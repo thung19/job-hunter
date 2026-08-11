@@ -326,16 +326,15 @@ def parse_json_source(text: str) -> list[dict]:
 
 
 def is_relevant_title(title: str) -> bool:
-    t = title.lower()
-    return any(kw in t for kw in RELEVANT_KEYWORDS)
+    """Return True only for titles that are both software-relevant and intern/co-op."""
+    t = (title or "").lower()
+    return bool(any(kw in t for kw in RELEVANT_KEYWORDS) and is_intern_title(t))
 
 
 # Matches internship / co-op titles. Word-boundaried so "Internal Audit" and
 # "International Tax" do NOT false-positive, while "Intern", "Internship",
-# "Interns", "Co-op", "Coop" all do. Applied to the company ATS + career-API
-# sources, which return full-time roles alongside interns; the dedicated
-# internship repos (JSON + markdown sources) are already intern-only by
-# construction, so they are trusted as-is.
+# "Interns", "Co-op", "Coop" all do. This is enforced across all sources so
+# full-time software roles are discarded unless they explicitly mention intern/co-op.
 INTERN_RE = re.compile(r"\bintern(ship)?s?\b|\bco-?ops?\b", re.IGNORECASE)
 
 
