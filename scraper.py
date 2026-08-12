@@ -47,8 +47,9 @@ JSON_SOURCES = [
 ]
 
 # Markdown-table sources. `title_filter=True` means the repo mixes disciplines
-# and we must keyword-filter titles for SWE relevance; False means the repo is
-# already scoped to software roles.
+# and we must keyword-filter titles for internship relevance; False means the repo is
+# already scoped to relevant internship roles. We keep a few extra internship repos
+# in the rotation to cover broader tech/data/GTM/client-facing roles.
 MARKDOWN_SOURCES = [
     {"url": "https://raw.githubusercontent.com/sndsh404/summer-2027-internships/main/README.md",
      "title_filter": False},
@@ -59,6 +60,10 @@ MARKDOWN_SOURCES = [
     {"url": "https://raw.githubusercontent.com/jobright-ai/2026-Software-Engineer-Internship/master/README.md",
      "title_filter": False},
     {"url": "https://raw.githubusercontent.com/jobright-ai/2026-Engineer-Internship/master/README.md",
+     "title_filter": True},
+    {"url": "https://raw.githubusercontent.com/pittcsc/Summer2027-Internships/main/README.md",
+     "title_filter": True},
+    {"url": "https://raw.githubusercontent.com/afredian/2027-summer-internships/main/README.md",
      "title_filter": True},
 ]
 
@@ -139,11 +144,16 @@ CAREER_API_SOURCES = [
 # SimplifyJobs-style categories: "Software", "Software Engineering",
 # "AI/ML/Data", "Data Science, AI & Machine Learning", "Quant",
 # "Quantitative Finance" all match; "Hardware"/"Product" do not.
-CATEGORY_KEYWORDS = ["software", "ai", "machine learning", "quant", "data science"]
+CATEGORY_KEYWORDS = [
+    "software", "ai", "machine learning", "quant", "data science", "data",
+    "sales", "gtm", "go to market", "solutions", "customer success",
+    "customer engineering", "forward deployed", "professional services",
+]
 
 # Keywords used to decide relevance when title filtering is required
 # (markdown sources, and JSON sources with no category field). Covers
-# software engineering, AI/ML, and quant roles.
+# software engineering, data, AI/ML, GTM, and client-facing technical roles,
+# while still requiring the internship/co-op wording before accepting a listing.
 RELEVANT_KEYWORDS = [
     "software", "swe", "developer", "programming", "full stack", "full-stack",
     "fullstack", "backend", "back-end", "back end", "frontend", "front-end",
@@ -151,9 +161,16 @@ RELEVANT_KEYWORDS = [
     "sre", "data engineer", "machine learning", "ml engineer", "ai engineer",
     "computer vision", "embedded software", "firmware", "platform engineer",
     "systems engineer", "cloud", "security engineer", "qa", "sdet", "test engineer",
-    # AI/ML
+    # Data / ML / research
     "artificial intelligence", "deep learning", "nlp", "llm", "data scientist",
     "data science", "research engineer", "applied scientist", "ai researcher",
+    "analytics", "bi engineer", "research scientist",
+    # GTM / customer-facing technical
+    "gtm", "go to market", "tech sales", "technical sales", "sales engineer",
+    "solutions engineer", "solution engineer", "solutions consultant",
+    "customer engineer", "customer success", "forward deployed", "fde",
+    "field engineer", "implementation engineer", "professional services",
+    "account executive", "business development", "ae", "pre-sales", "presales",
     # Quant
     "quant", "quantitative", "algo trading", "algorithmic trading",
 ]
@@ -226,6 +243,7 @@ def parse_markdown_table(text: str, title_filter: bool) -> list[dict]:
     prev_company = ""
     table_rows = 0
     kw_dropped = 0
+    intern_dropped = 0
     for line in text.splitlines():
         line = line.strip()
         if not line.startswith("|"):
@@ -274,6 +292,9 @@ def parse_markdown_table(text: str, title_filter: bool) -> list[dict]:
         if title_filter and not is_relevant_title(title):
             kw_dropped += 1
             continue
+        if not is_intern_title(title):
+            intern_dropped += 1
+            continue
 
         results.append({
             "key": f"url:{apply_url}",
@@ -283,30 +304,35 @@ def parse_markdown_table(text: str, title_filter: bool) -> list[dict]:
             "url": apply_url,
         })
     kw_note = f", dropped {kw_dropped} non-relevant title" if title_filter else ""
-    log(f"  parsed {table_rows} table rows -> kept {len(results)}{kw_note}", "PARSE")
+    intern_note = f", dropped {intern_dropped} non-intern" if intern_dropped else ""
+    log(f"  parsed {table_rows} table rows -> kept {len(results)}{kw_note}{intern_note}", "PARSE")
     return results
 
 
 def parse_json_source(text: str) -> list[dict]:
     results = []
     data = json.loads(text)
-    dropped = {"inactive": 0, "category": 0, "keyword": 0, "no_id": 0}
+    dropped = {"inactive": 0, "category": 0, "keyword": 0, "intern": 0, "no_id": 0}
     for item in data:
         if item.get("active") is False or item.get("is_visible") is False:
             dropped["inactive"] += 1
             continue
+        title = item.get("title") or ""
         category = item.get("category")
         if category:
-            # Structured category field -> filter on Software/AI/Quant categories.
+            # Structured category field -> filter on broader tech/data/GTM categories.
             if not any(kw in category.lower() for kw in CATEGORY_KEYWORDS):
                 dropped["category"] += 1
                 continue
         else:
             # Some repos (e.g. vanshb03) omit category entirely; fall back to
             # keyword-filtering the title for relevance.
-            if not is_relevant_title(item.get("title") or ""):
+            if not is_relevant_title(title):
                 dropped["keyword"] += 1
                 continue
+        if not is_intern_title(title):
+            dropped["intern"] += 1
+            continue
         listing_id = item.get("id")
         if not listing_id:
             dropped["no_id"] += 1
@@ -315,13 +341,14 @@ def parse_json_source(text: str) -> list[dict]:
         results.append({
             "key": f"json:{listing_id}",
             "company": item.get("company_name") or "Unknown",
-            "title": item.get("title") or "Software role",
+            "title": title or "Tech role",
             "location": ", ".join(locations) if isinstance(locations, list) else str(locations),
             "url": item.get("url") or "",
         })
     log(f"  parsed {len(data)} items -> kept {len(results)} relevant "
         f"(dropped: {dropped['inactive']} inactive, {dropped['category']} irrelevant cat, "
-        f"{dropped['keyword']} irrelevant title, {dropped['no_id']} missing id)", "PARSE")
+        f"{dropped['keyword']} irrelevant title, {dropped['intern']} non-intern, "
+        f"{dropped['no_id']} missing id)", "PARSE")
     return results
 
 
