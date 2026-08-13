@@ -19,7 +19,8 @@ yours needs to be on.
 - **Filtering:** JSON sources filter on `category` containing "Software" (or, when
   a feed has no category field, on SWE title keywords). The all-disciplines
   jobright *Engineer* repo is title-keyword filtered; the other markdown sources
-  are already SWE-scoped.
+  are already SWE-scoped. All sources then keep only internships with a remote
+  location or an explicitly identified US location.
 - **First run is silent:** when `seen.json` is empty, the first run records every
   current posting *without* emailing, so you don't get one giant 1000-item blast.
   From then on you only get genuinely new postings.

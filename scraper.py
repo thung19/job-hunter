@@ -183,6 +183,21 @@ LINK_RE = re.compile(
 )
 TAG_RE = re.compile(r"<[^>]+>")
 SEPARATOR_CELL_RE = re.compile(r"^:?-{2,}:?$")
+US_LOCATION_RE = re.compile(
+    r"\b(?:united states|u\.s\.a?\.?|usa|us)\b"
+    r"|\b(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|"
+    r"delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|"
+    r"kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|"
+    r"mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|"
+    r"new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|"
+    r"pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|"
+    r"utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|"
+    r"district of columbia)\b"
+    r"|(?:^|[,/ -])(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|"
+    r"KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|"
+    r"PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)(?=$|[,/ -])",
+    re.IGNORECASE,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -367,6 +382,16 @@ INTERN_RE = re.compile(r"\bintern(ship)?s?\b|\bco-?ops?\b", re.IGNORECASE)
 
 def is_intern_title(title: str) -> bool:
     return bool(INTERN_RE.search(title))
+
+
+def is_us_or_remote(location: str) -> bool:
+    """Return True for remote roles or locations explicitly identified as US."""
+    normalized = (location or "").strip()
+    if not normalized:
+        return False
+    if re.search(r"\bremote\b", normalized, re.IGNORECASE):
+        return True
+    return bool(US_LOCATION_RE.search(normalized))
 
 
 def parse_google_careers(text: str) -> list[dict]:
@@ -649,7 +674,9 @@ def gather_listings() -> list[dict]:
                     log(f"Unknown career API type '{src['type']}' for {src['name']}", "WARN")
             except Exception as e:  # noqa: BLE001
                 log(f"Career API source failed {src['name']} ({url}): {e}", "WARN")
-    return listings
+    filtered = [listing for listing in listings if is_us_or_remote(listing["location"])]
+    log(f"Location filter: kept {len(filtered)} of {len(listings)} US/remote listings.", "FILTER")
+    return filtered
 
 
 def parse_args(argv: list[str] | None = None):
