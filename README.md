@@ -1,9 +1,10 @@
-# Job Hunter — automated SWE posting emailer
+# Job Hunter — automated technology internship emailer
 
-Emails you brand-new software-engineering, AI/ML, and Quant internship/job
-postings **every hour from 8am to 10pm US Eastern** and never re-sends anything
-you've already seen. Runs entirely on GitHub Actions' free tier — no machine of
-yours needs to be on.
+Emails you brand-new technology internships across software engineering, AI/ML,
+data, product, design, GTM, technical sales, solutions, and customer-facing
+technical roles **every hour from 8am to 10pm US Eastern** and never re-sends
+anything you've already seen. Runs entirely on GitHub Actions' free tier — no
+machine of yours needs to be on.
 
 ## How it works
 
@@ -11,16 +12,18 @@ yours needs to be on.
   `zoneinfo("America/New_York")` to check whether the current Eastern hour is in
   `SEND_HOURS_ET` (8am-10pm, i.e. `{8, 9, ..., 22}`); outside that window it
   exits immediately. This tracks EST/EDT automatically.
-- **Sources:** two JSON feeds + five markdown-table READMEs (see `scraper.py`).
+- **Sources:** two JSON feeds, seven markdown-table READMEs, and direct public
+  Greenhouse, Lever, and Ashby employer job boards (see `scraper.py`).
 - **Dedup:** JSON listings dedupe on their `id`; markdown listings dedupe on the
   extracted apply URL. Seen keys are stored in `seen.json`, which the workflow
   commits back to the repo after each run (runners are ephemeral, so state lives
   in the repo).
-- **Filtering:** JSON sources filter on `category` containing "Software" (or, when
-  a feed has no category field, on SWE title keywords). The all-disciplines
-  jobright *Engineer* repo is title-keyword filtered; the other markdown sources
-  are already SWE-scoped. All sources then keep only internships with a remote
-  location or an explicitly identified US location.
+- **Filtering:** sources are limited to technical internships including software,
+  data, product, design, GTM, technical sales, solutions, and customer-facing
+  roles. All sources then keep only internships with a remote location or an
+  explicitly identified US location. Alerts only include direct employer/ATS
+  links; listings whose only URL is a known intermediary (such as Jobright,
+  LinkedIn, or Indeed) are skipped.
 - **First run is silent:** when `seen.json` is empty, the first run records every
   current posting *without* emailing, so you don't get one giant 1000-item blast.
   From then on you only get genuinely new postings.

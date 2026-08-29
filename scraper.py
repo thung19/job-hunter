@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Automated SWE internship/job alert emailer.
+Automated technology internship alert emailer.
 
 Runs on an hourly GitHub Actions cron. On each run it:
   1. Checks whether the current US-Eastern hour is within SEND_HOURS_ET
@@ -26,6 +26,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -39,6 +40,18 @@ EASTERN = ZoneInfo("America/New_York")
 
 SEEN_FILE = Path(__file__).parent / "seen.json"
 USER_AGENT = "job-hunter-bot/1.0 (+https://github.com/actions)"
+
+# These sites aggregate postings but do not reliably expose an employer's direct
+# application URL. Do not email an intermediary link in place of the real posting.
+INTERMEDIARY_HOSTS = {
+    "jobright.ai",
+    "linkedin.com",
+    "indeed.com",
+    "glassdoor.com",
+    "ziprecruiter.com",
+    "simplyhired.com",
+    "talent.com",
+}
 
 # JSON sources: flat array of listing objects. Dedupe on "id".
 JSON_SOURCES = [
@@ -82,13 +95,17 @@ GREENHOUSE_COMPANIES = {
     "robinhood":   "Robinhood",
     "sofi":        "SoFi",
     "toast":       "Toast",
-    # Productivity / collaboration
+    # Productivity / collaboration / enterprise software
     "figma":       "Figma",
     "asana":       "Asana",
     "squarespace": "Squarespace",
     "hubspot":     "HubSpot",
     "coursera":    "Coursera",
     "elastic":     "Elastic",
+    "dropbox":     "Dropbox",
+    "twilio":      "Twilio",
+    "samsara":     "Samsara",
+    "okta":        "Okta",
     # Social / consumer
     "discord":     "Discord",
     "reddit":      "Reddit",
@@ -106,6 +123,11 @@ GREENHOUSE_COMPANIES = {
     "mongodb":     "MongoDB",
     "datadog":     "Datadog",
     "scaleai":     "Scale AI",
+    "fastly":      "Fastly",
+    "commercetools": "commercetools",
+    "affirm":      "Affirm",
+    "nuro":        "Nuro",
+    "qualtrics":   "Qualtrics",
 }
 
 # Lever: https://api.lever.co/v0/postings/{slug}?mode=json
@@ -114,6 +136,7 @@ LEVER_COMPANIES = {
     "palantir": "Palantir",
     "spotify":  "Spotify",
     "waymo":    "Waymo",
+    "immutable": "Immutable",
 }
 
 # Ashby HQ: https://api.ashbyhq.com/posting-api/job-board/{slug}
@@ -124,6 +147,15 @@ ASHBY_COMPANIES = {
     "plaid":       "Plaid",
     "benchling":   "Benchling",
     "snowflake":   "Snowflake",
+    "vanta":       "Vanta",
+    "linear":      "Linear",
+    "posthog":     "PostHog",
+    "supabase":    "Supabase",
+    "merge":       "Merge",
+    "replit":      "Replit",
+    "1password":   "1Password",
+    "qonto":       "Qonto",
+    "clickup":     "ClickUp",
 }
 
 # Companies that run their own career JSON APIs (not Greenhouse/Lever/Ashby).
@@ -148,6 +180,8 @@ CATEGORY_KEYWORDS = [
     "software", "ai", "machine learning", "quant", "data science", "data",
     "sales", "gtm", "go to market", "solutions", "customer success",
     "customer engineering", "forward deployed", "professional services",
+    "product", "marketing", "growth", "design", "analytics", "technology",
+    "revenue operations", "sales operations", "business intelligence",
 ]
 
 # Keywords used to decide relevance when title filtering is required
@@ -171,6 +205,13 @@ RELEVANT_KEYWORDS = [
     "customer engineer", "customer success", "forward deployed", "fde",
     "field engineer", "implementation engineer", "professional services",
     "account executive", "business development", "ae", "pre-sales", "presales",
+    # Product / technical business / design
+    "product manager", "product management", "product marketing", "growth marketing",
+    "demand generation", "revenue operations", "sales operations", "business operations",
+    "partnerships", "technical program manager", "program manager", "data analyst",
+    "business analyst", "product analyst", "business intelligence", "information technology",
+    "it support", "systems administrator", "user experience", "product designer",
+    "product design", "visual design", "interaction design",
     # Quant
     "quant", "quantitative", "algo trading", "algorithmic trading",
 ]
@@ -394,6 +435,16 @@ def is_us_or_remote(location: str) -> bool:
     return bool(US_LOCATION_RE.search(normalized))
 
 
+def is_direct_job_url(url: str) -> bool:
+    """Return False for known job aggregators and other intermediary URLs."""
+    host = urlparse(url).hostname or ""
+    host = host.lower().removeprefix("www.")
+    return bool(host) and not any(
+        host == intermediary or host.endswith(f".{intermediary}")
+        for intermediary in INTERMEDIARY_HOSTS
+    )
+
+
 def parse_google_careers(text: str) -> list[dict]:
     """Parse Google Careers API JSON response."""
     results = []
@@ -571,7 +622,7 @@ def build_email_html(postings: list[dict]) -> str:
     now = datetime.now(EASTERN).strftime("%b %d, %Y %I:%M %p ET")
     return (
         f'<html><body style="font-family:-apple-system,Segoe UI,Arial,sans-serif;">'
-        f'<h2>{len(postings)} new SWE posting(s)</h2>'
+        f'<h2>{len(postings)} new technology internship posting(s)</h2>'
         f'<p style="color:#777;">Generated {now}</p>'
         f'<table style="border-collapse:collapse;width:100%;font-size:14px;">'
         f'<thead><tr style="text-align:left;background:#f6f6f6;">'
@@ -591,7 +642,7 @@ def send_email(postings: list[dict]) -> None:
     email_to = os.environ.get("EMAIL_TO", "thomas.hung@outlook.com")
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"[Job Alert] {len(postings)} new SWE posting(s)"
+    msg["Subject"] = f"[Job Alert] {len(postings)} new technology internship posting(s)"
     msg["From"] = email_from
     msg["To"] = email_to
 
@@ -674,15 +725,17 @@ def gather_listings() -> list[dict]:
                     log(f"Unknown career API type '{src['type']}' for {src['name']}", "WARN")
             except Exception as e:  # noqa: BLE001
                 log(f"Career API source failed {src['name']} ({url}): {e}", "WARN")
-    filtered = [listing for listing in listings if is_us_or_remote(listing["location"])]
-    log(f"Location filter: kept {len(filtered)} of {len(listings)} US/remote listings.", "FILTER")
+    location_filtered = [listing for listing in listings if is_us_or_remote(listing["location"])]
+    filtered = [listing for listing in location_filtered if is_direct_job_url(listing["url"])]
+    log(f"Filters: kept {len(filtered)} of {len(listings)} listings after US/remote and "
+        f"direct-link checks ({len(location_filtered) - len(filtered)} intermediary links dropped).", "FILTER")
     return filtered
 
 
 def parse_args(argv: list[str] | None = None):
     import argparse
     p = argparse.ArgumentParser(
-        description="Fetch, filter and email new SWE job/internship postings.")
+        description="Fetch, filter and email new technology internship postings.")
     p.add_argument("--force", "--now", action="store_true", dest="force",
                    help="Run immediately, ignoring the 8/12/16/20 ET time gate. "
                         "Also enabled by the FORCE_RUN=1 env var.")
@@ -726,7 +779,7 @@ def main(argv: list[str] | None = None) -> int:
     log(f"Loaded seen.json: {len(seen)} known keys (first_run={first_run})")
 
     listings = gather_listings()
-    log(f"Gathered {len(listings)} SWE listings from all sources.")
+    log(f"Gathered {len(listings)} technology internship listings from all sources.")
 
     # De-dupe within this batch as well as against history.
     new_postings = []
