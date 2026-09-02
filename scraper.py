@@ -128,20 +128,20 @@ GREENHOUSE_COMPANIES = {
     "affirm":      "Affirm",
     "nuro":        "Nuro",
     "qualtrics":   "Qualtrics",
+    "waymo":       "Waymo",
 }
 
 # Lever: https://api.lever.co/v0/postings/{slug}?mode=json
 LEVER_COMPANIES = {
-    "openai":   "OpenAI",
     "palantir": "Palantir",
     "spotify":  "Spotify",
-    "waymo":    "Waymo",
     "immutable": "Immutable",
 }
 
 # Ashby HQ: https://api.ashbyhq.com/posting-api/job-board/{slug}
 # Many fast-growing startups use Ashby instead of Greenhouse/Lever.
 ASHBY_COMPANIES = {
+    "openai":      "OpenAI",
     "ramp":        "Ramp",
     "notion":      "Notion",
     "plaid":       "Plaid",
@@ -604,6 +604,16 @@ def save_seen(seen: set[str]) -> None:
 # --------------------------------------------------------------------------- #
 
 def build_email_html(postings: list[dict]) -> str:
+    now = datetime.now(EASTERN).strftime("%b %d, %Y %I:%M %p ET")
+    if not postings:
+        return (
+            f'<html><body style="font-family:-apple-system,Segoe UI,Arial,sans-serif;">'
+            f'<h2>No new technology internship postings found</h2>'
+            f'<p style="color:#777;">Generated {now}</p>'
+            f'<p style="color:#444;">There were no new internship listings matching the current filters this run.</p>'
+            f'</body></html>'
+        )
+
     rows = []
     for p in postings:
         company = escape(p["company"])
@@ -619,7 +629,6 @@ def build_email_html(postings: list[dict]) -> str:
             f'<a href="{url}">Apply</a></td>'
             f'</tr>'
         )
-    now = datetime.now(EASTERN).strftime("%b %d, %Y %I:%M %p ET")
     return (
         f'<html><body style="font-family:-apple-system,Segoe UI,Arial,sans-serif;">'
         f'<h2>{len(postings)} new technology internship posting(s)</h2>'
@@ -642,13 +651,21 @@ def send_email(postings: list[dict]) -> None:
     email_to = os.environ.get("EMAIL_TO", "thomas.hung@outlook.com")
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"[Job Alert] {len(postings)} new technology internship posting(s)"
+    subject = (
+        "[Job Alert] No new technology internship postings found"
+        if not postings else f"[Job Alert] {len(postings)} new technology internship posting(s)"
+    )
+    msg["Subject"] = subject
     msg["From"] = email_from
     msg["To"] = email_to
 
-    plain = "\n".join(
-        f"- {p['company']} — {p['title']} ({p['location'] or 'n/a'})\n  {p['url']}"
-        for p in postings
+    plain = (
+        "No new technology internship postings were found this run.\n"
+        if not postings
+        else "\n".join(
+            f"- {p['company']} — {p['title']} ({p['location'] or 'n/a'})\n  {p['url']}"
+            for p in postings
+        )
     )
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(build_email_html(postings), "html"))
@@ -797,6 +814,15 @@ def main(argv: list[str] | None = None) -> int:
         new_postings.append(item)
     log(f"Dedupe: {len(new_postings)} new, {dup_seen} already-seen, {dup_batch} intra-batch dupes.")
 
+    if not listings:
+        log("No listings found from all sources; sending a no-results email.")
+        if args.dry_run:
+            log("[dry-run] Would email a 'no jobs found' notice. No email sent, seen.json untouched.", "EMAIL")
+            return 0
+        send_email([])
+        log("No-results email sent.")
+        return 0
+
     if first_run and not args.seed_send:
         # Seed silently so the very first run doesn't blast hundreds of emails.
         if args.dry_run:
@@ -809,7 +835,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not new_postings:
-        log("No new postings to send. Done.")
+        log("No new postings to send; sending a no-results email.")
+        if args.dry_run:
+            log("[dry-run] Would email a 'no new postings' notice. No email sent, seen.json untouched.", "EMAIL")
+            return 0
+        send_email([])
+        log("No-results email sent.")
         return 0
 
     log(f"{len(new_postings)} new posting(s) to email:")
