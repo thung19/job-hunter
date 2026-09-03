@@ -195,6 +195,7 @@ RELEVANT_KEYWORDS = [
     "sre", "data engineer", "machine learning", "ml engineer", "ai engineer",
     "computer vision", "embedded software", "firmware", "platform engineer",
     "systems engineer", "cloud", "security engineer", "qa", "sdet", "test engineer",
+    "engineer", "engineering", "technology", "computer science",
     # Data / ML / research
     "artificial intelligence", "deep learning", "nlp", "llm", "data scientist",
     "data science", "research engineer", "applied scientist", "ai researcher",
@@ -529,7 +530,11 @@ def parse_lever_source(text: str, company: str) -> list[dict]:
         if not job_id:
             continue
         cats = job.get("categories") or {}
-        location = cats.get("location") or ""
+        all_locations = cats.get("allLocations") or []
+        if isinstance(all_locations, list) and all_locations:
+            location = ", ".join(str(value) for value in all_locations if value)
+        else:
+            location = cats.get("location") or ""
         url = job.get("hostedUrl") or job.get("applyUrl") or ""
         results.append({
             "key": f"lever:{job_id}",
