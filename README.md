@@ -12,12 +12,19 @@ machine of yours needs to be on.
   `zoneinfo("America/New_York")` to check whether the current Eastern hour is in
   `SEND_HOURS_ET` (8am-10pm, i.e. `{8, 9, ..., 22}`); outside that window it
   exits immediately. This tracks EST/EDT automatically.
-- **Sources:** two JSON feeds, seven markdown-table READMEs, and direct public
-  Greenhouse, Lever, and Ashby employer job boards (see `scraper.py`).
-- **Dedup:** JSON listings dedupe on their `id`; markdown listings dedupe on the
-  extracted apply URL. Seen keys are stored in `seen.json`, which the workflow
-  commits back to the repo after each run (runners are ephemeral, so state lives
-  in the repo).
+- **Sources:** three JSON feeds, twelve markdown-table READMEs, one CSV feed, and
+  direct public Greenhouse, Lever, Ashby, Workday, and Workable employer job boards —
+  125 sources in total (see `scraper.py`). Deliberately excludes Twitter/X and
+  Instagram: neither has a free, reliable API for this (X requires a paid enterprise
+  tier; IG requires an authenticated session), scraping either would violate their
+  ToS and get blocked fast from GitHub Actions' shared IP ranges, and personal
+  accounts aren't structured data anyway (no company/title/location/link fields to
+  parse reliably).
+- **Dedup:** JSON and CSV listings dedupe on their `id`; markdown listings dedupe on
+  the extracted apply URL; direct ATS sources (Greenhouse/Lever/Ashby/Workday/
+  Workable) dedupe on their own posting id. Seen keys are stored in `seen.json`,
+  which the workflow commits back to the repo after each run (runners are
+  ephemeral, so state lives in the repo).
 - **Filtering:** sources are limited to technical internships including software,
   data, product, design, GTM, technical sales, solutions, and customer-facing
   roles. All sources then keep only internships with a remote location or an

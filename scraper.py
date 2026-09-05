@@ -16,6 +16,8 @@ workflow, since GitHub Actions runners are ephemeral.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import re
@@ -56,7 +58,16 @@ INTERMEDIARY_HOSTS = {
 # JSON sources: flat array of listing objects. Dedupe on "id".
 JSON_SOURCES = [
     "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json",
+    "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
     "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json",
+]
+
+# CSV sources: flat table with header row. Dedupe on the "id" column.
+CSV_SOURCES = [
+    # Self-scraped directly from ~4,700 ATS boards (not a re-aggregation of the repos
+    # above), refreshed every ~30min. Has its own "category" column (Software, Data &
+    # ML/AI, Hardware, Security, Quant) so we filter on that like the Simplify JSON feeds.
+    "https://raw.githubusercontent.com/zshah101/Automated-List-Of-Summer-2027-and-Fall-2026-Tech-Internships/main/data/internships.csv",
 ]
 
 # Markdown-table sources. `title_filter=True` means the repo mixes disciplines
@@ -74,10 +85,20 @@ MARKDOWN_SOURCES = [
      "title_filter": False},
     {"url": "https://raw.githubusercontent.com/jobright-ai/2026-Engineer-Internship/master/README.md",
      "title_filter": True},
-    {"url": "https://raw.githubusercontent.com/pittcsc/Summer2027-Internships/main/README.md",
+    {"url": "https://raw.githubusercontent.com/jobright-ai/2026-Product-Management-Internship/master/README.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/jobright-ai/2026-Design-Internship/master/README.md",
      "title_filter": True},
-    {"url": "https://raw.githubusercontent.com/afredian/2027-summer-internships/main/README.md",
+    {"url": "https://raw.githubusercontent.com/jobright-ai/2026-Sales-Internship/master/README.md",
      "title_filter": True},
+    {"url": "https://raw.githubusercontent.com/speedyapply/2027-AI-College-Jobs/main/README.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/zapplyjobs/Internships-2027/main/README.md",
+     "title_filter": True},
+    {"url": "https://raw.githubusercontent.com/negarprh/Canadian-Tech-Internships-2027/main/README.md",
+     "title_filter": True},
+    {"url": "https://raw.githubusercontent.com/ApplyGuy/2027-Internships/main/README.md",
+     "title_filter": False},
 ]
 
 # Direct company career-page sources via public ATS APIs (no scraping required).
@@ -129,6 +150,21 @@ GREENHOUSE_COMPANIES = {
     "nuro":        "Nuro",
     "qualtrics":   "Qualtrics",
     "waymo":       "Waymo",
+    # Added in a later sweep for broader coverage
+    "block":         "Block (Square)",
+    "anthropic":     "Anthropic",
+    "airtable":      "Airtable",
+    "chime":         "Chime",
+    "faire":         "Faire",
+    "vercel":        "Vercel",
+    "mercury":       "Mercury",
+    "carta":         "Carta",
+    "gemini":        "Gemini",
+    "attentive":     "Attentive",
+    "webflow":       "Webflow",
+    "epicgames":     "Epic Games",
+    "riotgames":     "Riot Games",
+    "twitch":        "Twitch",
 }
 
 # Lever: https://api.lever.co/v0/postings/{slug}?mode=json
@@ -136,6 +172,11 @@ LEVER_COMPANIES = {
     "palantir": "Palantir",
     "spotify":  "Spotify",
     "immutable": "Immutable",
+    "outreach":   "Outreach",
+    "veeva":      "Veeva Systems",
+    "hermeus":    "Hermeus",
+    "wealthfront": "Wealthfront",
+    "angellist":  "AngelList",
 }
 
 # Ashby HQ: https://api.ashbyhq.com/posting-api/job-board/{slug}
@@ -156,21 +197,60 @@ ASHBY_COMPANIES = {
     "1password":   "1Password",
     "qonto":       "Qonto",
     "clickup":     "ClickUp",
+    # Added in a later sweep for broader coverage (mostly AI/infra startups)
+    "zip":          "Zip",
+    "persona":      "Persona",
+    "drata":        "Drata",
+    "gitbook":      "GitBook",
+    "cursor":       "Cursor (Anysphere)",
+    "perplexity":   "Perplexity AI",
+    "cohere":       "Cohere",
+    "runway":       "Runway",
+    "sierra":       "Sierra",
+    "fireworks":    "Fireworks AI",
+    "baseten":      "Baseten",
+    "modal":        "Modal",
+    "hex":          "Hex",
+    "airbyte":      "Airbyte",
+    "hightouch":    "Hightouch",
+    "gamma":        "Gamma",
+    "synthesia":    "Synthesia",
+    "elevenlabs":   "ElevenLabs",
+    "deepgram":     "Deepgram",
+    "lovable":      "Lovable",
+    "anyscale":     "Anyscale",
+    "pinecone":     "Pinecone",
+    "weaviate":     "Weaviate",
+    "langchain":    "LangChain",
+    "llamaindex":   "LlamaIndex",
+    "crusoe":       "Crusoe",
 }
 
-# Companies that run their own career JSON APIs (not Greenhouse/Lever/Ashby).
-# Note: Amazon, Meta, Apple, Microsoft, NVIDIA etc. use Workday/SPAs that
-# require a headless browser and are not listed here.
-CAREER_API_SOURCES = [
-    {
-        "name": "Google",
-        "type": "google",
-        "urls": [
-            "https://careers.google.com/api/v3/search/?q=software+engineer+intern&page_size=20",
-            "https://careers.google.com/api/v3/search/?q=software+engineer&location=United+States&page_size=20",
-        ],
-    },
-]
+# Workday CXS API: POST https://{tenant}.{cluster}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
+# The {cluster} (wd1/wd5/wd12/...) and {site} slug are arbitrary per tenant with no
+# predictable pattern - each was hand-verified by fetching the endpoint. This unlocks
+# large employers that don't run Greenhouse/Lever/Ashby at all. Note: Amazon, Meta,
+# Apple, Microsoft also run Workday-adjacent stacks but sit behind bot protection that
+# blocks this plain-POST approach - don't add them without re-verifying by hand.
+WORKDAY_COMPANIES = {
+    # slug: (tenant, cluster, site, display name)
+    "nvidia":     ("nvidia", "wd5", "NVIDIAExternalCareerSite", "NVIDIA"),
+    "salesforce": ("salesforce", "wd12", "External_Career_Site", "Salesforce"),
+    "adobe":      ("adobe", "wd5", "external_experienced", "Adobe"),
+    "visa":       ("visa", "wd5", "Visa_Early_Careers", "Visa"),
+    "micron":     ("micron", "wd1", "External", "Micron"),
+}
+
+# Workable: GET https://apply.workable.com/api/v1/widget/accounts/{account}
+# Most recognizable Workable accounts turned out to be abandoned (HTTP 200, "jobs": [])
+# after the company migrated to Greenhouse/Lever/Ashby/Workday - these are the ones
+# hand-verified to still be live with real, current postings.
+WORKABLE_COMPANIES = {
+    "datavisor-jobs": "DataVisor",
+    "coldquanta":      "Infleqtion",
+    "enfos-inc":       "ENFOS",
+}
+
 
 # Category substrings (JSON sources) that count as relevant. Matched against
 # SimplifyJobs-style categories: "Software", "Software Engineering",
@@ -182,6 +262,7 @@ CATEGORY_KEYWORDS = [
     "customer engineering", "forward deployed", "professional services",
     "product", "marketing", "growth", "design", "analytics", "technology",
     "revenue operations", "sales operations", "business intelligence",
+    "security", "cybersecurity",
 ]
 
 # Keywords used to decide relevance when title filtering is required
@@ -217,9 +298,13 @@ RELEVANT_KEYWORDS = [
     "quant", "quantitative", "algo trading", "algorithmic trading",
 ]
 
-# Matches BOTH markdown links [text](url) AND raw HTML <a href="url">text</a>.
+# Matches badge-style [![alt](badge.svg)](url) links, plain markdown [text](url) links,
+# AND raw HTML <a href="url">text</a>. The badge-style alternative MUST come first: a
+# nested markdown image's own "]" would otherwise prematurely close the plain-link
+# alternative's text group, capturing the badge image's src instead of the real url.
 LINK_RE = re.compile(
-    r'\[(?P<mdtext>[^\]]*)\]\((?P<mdurl>[^)]+)\)'      # [text](url)
+    r'\[!\[(?P<imgalt>[^\]]*)\]\([^)]*\)\]\((?P<mdurl_badge>[^)]+)\)'  # [![alt](badge.svg)](url)
+    r'|\[(?P<mdtext>[^\]]*)\]\((?P<mdurl>[^)]+)\)'      # [text](url)
     r'|<a\s+href="(?P<hturl>[^"]+)"[^>]*>(?P<httext>.*?)</a>',  # <a href="url">text</a>
     re.IGNORECASE | re.DOTALL,
 )
@@ -265,6 +350,21 @@ def fetch(url: str) -> str:
     return body
 
 
+def fetch_json_post(url: str, payload: dict) -> str:
+    """POST a JSON body and return the raw response text (used by Workday's CXS API)."""
+    log(f"Fetching (POST) {url}", "FETCH")
+    data = json.dumps(payload).encode("utf-8")
+    req = Request(url, data=data, headers={
+        "User-Agent": USER_AGENT,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    })
+    with urlopen(req, timeout=60) as resp:
+        body = resp.read().decode("utf-8", errors="replace")
+    log(f"  -> {len(body):,} bytes (HTTP {resp.status})", "FETCH")
+    return body
+
+
 # --------------------------------------------------------------------------- #
 # Parsing helpers
 # --------------------------------------------------------------------------- #
@@ -273,7 +373,11 @@ def extract_links(cell: str) -> list[tuple[str, str]]:
     """Return [(text, url), ...] for every markdown/HTML link in a cell."""
     links = []
     for m in LINK_RE.finditer(cell):
-        if m.group("mdurl") is not None:
+        if m.group("mdurl_badge") is not None:
+            # Badge/image apply button: [![alt](badge.svg)](url) - the real
+            # destination is the OUTER url, not the badge image's own src.
+            text, url = m.group("imgalt"), m.group("mdurl_badge")
+        elif m.group("mdurl") is not None:
             text, url = m.group("mdtext"), m.group("mdurl")
         else:
             text, url = m.group("httext"), m.group("hturl")
@@ -284,7 +388,10 @@ def extract_links(cell: str) -> list[tuple[str, str]]:
 
 def cell_text(cell: str) -> str:
     """Human-readable text of a cell: markdown links -> their text, HTML stripped."""
-    text = LINK_RE.sub(lambda m: TAG_RE.sub("", (m.group("mdtext") or m.group("httext") or "")), cell)
+    text = LINK_RE.sub(
+        lambda m: TAG_RE.sub("", (m.group("imgalt") or m.group("mdtext") or m.group("httext") or "")),
+        cell,
+    )
     text = TAG_RE.sub("", text)
     return text.replace("**", "").strip()
 
@@ -409,6 +516,45 @@ def parse_json_source(text: str) -> list[dict]:
     return results
 
 
+def parse_csv_source(text: str) -> list[dict]:
+    """Parse a flat CSV of listings (header row required). Expects columns id,
+    company, title, category, location, url at minimum; extra columns are ignored."""
+    results = []
+    dropped = {"category": 0, "keyword": 0, "intern": 0, "no_id": 0}
+    rows = 0
+    for row in csv.DictReader(io.StringIO(text)):
+        rows += 1
+        title = row.get("title") or ""
+        category = row.get("category") or ""
+        if category:
+            # Structured category column -> filter on the same broad tech/data/GTM
+            # categories as the JSON sources.
+            if not any(kw in category.lower() for kw in CATEGORY_KEYWORDS):
+                dropped["category"] += 1
+                continue
+        elif not is_relevant_title(title):
+            dropped["keyword"] += 1
+            continue
+        if not is_intern_title(title):
+            dropped["intern"] += 1
+            continue
+        row_id = row.get("id") or ""
+        if not row_id:
+            dropped["no_id"] += 1
+            continue
+        results.append({
+            "key": f"csv:{row_id}",
+            "company": row.get("company") or "Unknown",
+            "title": title or "Tech role",
+            "location": row.get("location") or "",
+            "url": row.get("url") or "",
+        })
+    log(f"  parsed {rows} rows -> kept {len(results)} "
+        f"(dropped: {dropped['category']} irrelevant cat, {dropped['keyword']} irrelevant title, "
+        f"{dropped['intern']} non-intern, {dropped['no_id']} missing id)", "PARSE")
+    return results
+
+
 def is_relevant_title(title: str) -> bool:
     """Return True only for titles that are both software-relevant and intern/co-op."""
     t = (title or "").lower()
@@ -444,40 +590,6 @@ def is_direct_job_url(url: str) -> bool:
         host == intermediary or host.endswith(f".{intermediary}")
         for intermediary in INTERMEDIARY_HOSTS
     )
-
-
-def parse_google_careers(text: str) -> list[dict]:
-    """Parse Google Careers API JSON response."""
-    results = []
-    data = json.loads(text)
-    jobs = data.get("jobs") or []
-    dropped_kw = dropped_notintern = 0
-    for job in jobs:
-        title = job.get("title") or ""
-        if not is_relevant_title(title):
-            dropped_kw += 1
-            continue
-        if not is_intern_title(title):
-            dropped_notintern += 1
-            continue
-        job_id = job.get("job_id") or ""
-        if not job_id:
-            continue
-        locations = job.get("locations") or []
-        location = ", ".join(
-            loc.get("display", "") for loc in locations if loc.get("display")
-        )
-        apply_url = job.get("apply_url") or ""
-        results.append({
-            "key": f"google:{job_id}",
-            "company": "Google",
-            "title": title,
-            "location": location,
-            "url": apply_url,
-        })
-    log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
-        f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern)", "PARSE")
-    return results
 
 
 def parse_greenhouse_source(text: str, company: str) -> list[dict]:
@@ -586,6 +698,91 @@ def parse_ashby_source(text: str, company: str) -> list[dict]:
     return results
 
 
+def parse_workday_jobs(jobs: list[dict], company: str, tenant: str, cluster: str) -> list[dict]:
+    """Map already-fetched Workday CXS jobPostings entries to our listing schema."""
+    results = []
+    dropped_kw = dropped_notintern = 0
+    for job in jobs:
+        title = job.get("title") or ""
+        if not is_relevant_title(title):
+            dropped_kw += 1
+            continue
+        if not is_intern_title(title):
+            dropped_notintern += 1
+            continue
+        ext_path = job.get("externalPath") or ""
+        if not ext_path:
+            continue
+        results.append({
+            "key": f"workday:{tenant}:{ext_path}",
+            "company": company,
+            "title": title,
+            "location": job.get("locationsText") or "",
+            "url": f"https://{tenant}.{cluster}.myworkdayjobs.com{ext_path}",
+        })
+    log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
+        f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern)", "PARSE")
+    return results
+
+
+def fetch_workday_source(tenant: str, cluster: str, site: str, company: str) -> list[dict]:
+    """Fetch a Workday CXS job board, searching 'intern' and 'co-op' server-side with
+    pagination. Workday boards can hold thousands of postings (e.g. NVIDIA ~2000); a
+    targeted search keeps this to a handful of requests instead of paging through everything."""
+    base_url = f"https://{tenant}.{cluster}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs"
+    seen_paths: set[str] = set()
+    all_jobs: list[dict] = []
+    page_size = 20
+    max_pages = 10  # 200 results per search term is far more than any intern search needs
+    for search_text in ("intern", "co-op"):
+        offset = 0
+        for _ in range(max_pages):
+            payload = {"appliedFacets": {}, "limit": page_size, "offset": offset, "searchText": search_text}
+            data = json.loads(fetch_json_post(base_url, payload))
+            postings = data.get("jobPostings") or []
+            for job in postings:
+                path = job.get("externalPath")
+                if path and path not in seen_paths:
+                    seen_paths.add(path)
+                    all_jobs.append(job)
+            total = data.get("total", 0)
+            offset += page_size
+            if offset >= total or not postings:
+                break
+    return parse_workday_jobs(all_jobs, company, tenant, cluster)
+
+
+def parse_workable_source(text: str, account: str, company: str) -> list[dict]:
+    """Parse a Workable public widget API response (apply.workable.com)."""
+    results = []
+    data = json.loads(text)
+    jobs = data.get("jobs") or []
+    dropped_kw = dropped_notintern = 0
+    for job in jobs:
+        title = job.get("title") or ""
+        if not is_relevant_title(title):
+            dropped_kw += 1
+            continue
+        if not is_intern_title(title):
+            dropped_notintern += 1
+            continue
+        shortcode = job.get("shortcode") or ""
+        if not shortcode:
+            continue
+        location = ", ".join(x for x in [job.get("city"), job.get("state")] if x) or (job.get("country") or "")
+        url = job.get("url") or job.get("shortlink") or ""
+        results.append({
+            "key": f"workable:{account}:{shortcode}",
+            "company": company,
+            "title": title,
+            "location": location,
+            "url": url,
+        })
+    log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
+        f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern)", "PARSE")
+    return results
+
+
 # --------------------------------------------------------------------------- #
 # Seen-state persistence
 # --------------------------------------------------------------------------- #
@@ -691,10 +888,9 @@ def send_email(postings: list[dict]) -> None:
 
 def gather_listings() -> list[dict]:
     listings: list[dict] = []
-    career_api_url_count = sum(len(s["urls"]) for s in CAREER_API_SOURCES)
-    total = (len(JSON_SOURCES) + len(MARKDOWN_SOURCES)
+    total = (len(JSON_SOURCES) + len(MARKDOWN_SOURCES) + len(CSV_SOURCES)
              + len(GREENHOUSE_COMPANIES) + len(LEVER_COMPANIES)
-             + len(ASHBY_COMPANIES) + career_api_url_count)
+             + len(ASHBY_COMPANIES) + len(WORKDAY_COMPANIES) + len(WORKABLE_COMPANIES))
     idx = 0
     for url in JSON_SOURCES:
         idx += 1
@@ -711,6 +907,13 @@ def gather_listings() -> list[dict]:
             listings += parse_markdown_table(fetch(src["url"]), src["title_filter"])
         except Exception as e:  # noqa: BLE001
             log(f"Markdown source failed {src['url']}: {e}", "WARN")
+    for url in CSV_SOURCES:
+        idx += 1
+        log(f"Source {idx}/{total} (CSV): {url.split('/')[4]}", "SOURCE")
+        try:
+            listings += parse_csv_source(fetch(url))
+        except Exception as e:  # noqa: BLE001
+            log(f"CSV source failed {url}: {e}", "WARN")
     for slug, name in GREENHOUSE_COMPANIES.items():
         idx += 1
         log(f"Source {idx}/{total} (Greenhouse): {name}", "SOURCE")
@@ -735,18 +938,21 @@ def gather_listings() -> list[dict]:
             listings += parse_ashby_source(fetch(url), name)
         except Exception as e:  # noqa: BLE001
             log(f"Ashby source failed {slug}: {e}", "WARN")
-    for src in CAREER_API_SOURCES:
-        for url in src["urls"]:
-            idx += 1
-            log(f"Source {idx}/{total} (Career API): {src['name']} — {url.split('?')[0].split('/')[-1] or src['name']}", "SOURCE")
-            try:
-                raw = fetch(url)
-                if src["type"] == "google":
-                    listings += parse_google_careers(raw)
-                else:
-                    log(f"Unknown career API type '{src['type']}' for {src['name']}", "WARN")
-            except Exception as e:  # noqa: BLE001
-                log(f"Career API source failed {src['name']} ({url}): {e}", "WARN")
+    for slug, (tenant, cluster, site, name) in WORKDAY_COMPANIES.items():
+        idx += 1
+        log(f"Source {idx}/{total} (Workday): {name}", "SOURCE")
+        try:
+            listings += fetch_workday_source(tenant, cluster, site, name)
+        except Exception as e:  # noqa: BLE001
+            log(f"Workday source failed {slug}: {e}", "WARN")
+    for account, name in WORKABLE_COMPANIES.items():
+        idx += 1
+        log(f"Source {idx}/{total} (Workable): {name}", "SOURCE")
+        url = f"https://apply.workable.com/api/v1/widget/accounts/{account}"
+        try:
+            listings += parse_workable_source(fetch(url), account, name)
+        except Exception as e:  # noqa: BLE001
+            log(f"Workable source failed {account}: {e}", "WARN")
     location_filtered = [listing for listing in listings if is_us_or_remote(listing["location"])]
     filtered = [listing for listing in location_filtered if is_direct_job_url(listing["url"])]
     log(f"Filters: kept {len(filtered)} of {len(listings)} listings after US/remote and "
