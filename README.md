@@ -14,7 +14,7 @@ machine of yours needs to be on.
   exits immediately. This tracks EST/EDT automatically.
 - **Sources:** three JSON feeds, twelve markdown-table READMEs, one CSV feed, and
   direct public Greenhouse, Lever, Ashby, Workday, and Workable employer job boards —
-  125 sources in total (see `scraper.py`). Deliberately excludes Twitter/X and
+  187 sources in total (see `scraper.py`). Deliberately excludes Twitter/X and
   Instagram: neither has a free, reliable API for this (X requires a paid enterprise
   tier; IG requires an authenticated session), scraping either would violate their
   ToS and get blocked fast from GitHub Actions' shared IP ranges, and personal

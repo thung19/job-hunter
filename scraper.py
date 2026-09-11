@@ -165,6 +165,53 @@ GREENHOUSE_COMPANIES = {
     "epicgames":     "Epic Games",
     "riotgames":     "Riot Games",
     "twitch":        "Twitch",
+    # Added from a large user-supplied company list (live-verified: each slug's
+    # board page/company_name was checked to actually match the target company,
+    # not just return any 200 response - several plausible-looking slug guesses
+    # from that sweep turned out to be a *different*, unrelated company of the
+    # same generic name and were deliberately left out).
+    "akunacapital":         "Akuna Capital",
+    "alarmcom":             "Alarm.com",
+    "appian":               "Appian",
+    "auctane":              "Auctane",
+    "avathon":              "Avathon",
+    "bandwidth":            "Bandwidth",
+    "calyxo":               "Calyxo",
+    "commvault":            "Commvault",
+    "exiger":               "Exiger",
+    "galileo":              "Galileo",
+    "gallup":               "Gallup",
+    "godaddy":              "GoDaddy",
+    "goldenpetbrands":      "Golden Pet Brands",
+    "hbkcapitalmanagement": "HBK Capital Management",
+    "honehealth":           "Hone Health",
+    "iconiq":               "ICONIQ Capital",
+    "idme":                 "ID.me",
+    "iex":                  "IEX Group",
+    "impiricus":            "Impiricus",
+    "kapitus":              "Kapitus",
+    "minitab":              "Minitab",
+    "nasuni":               "Nasuni",
+    "nisc":                 "National Information Solutions Cooperative",
+    "northmarq":            "Northmarq",
+    "oceanx":               "OceanX",
+    "opensesame":           "OpenSesame",
+    "pacificfusion":        "Pacific Fusion",
+    "patientpoint":         "PatientPoint",
+    "perpay":               "Perpay",
+    "rfsmart":              "RF-SMART",
+    "schonfeld":            "Schonfeld",
+    "sigmacomputing":       "Sigma Computing",
+    "snorkelai":            "Snorkel AI",
+    "trumid":               "Trumid",
+    "truveta":              "Truveta",
+    "typeface":             "Typeface",
+    "upbound":              "Upbound Group",
+    "vast":                 "Vast",
+    "veeamsoftware":        "Veeam Software",
+    "whop":                 "Whop",
+    "yesenergy":            "Yes Energy",
+    "zscaler":              "Zscaler",
 }
 
 # Lever: https://api.lever.co/v0/postings/{slug}?mode=json
@@ -177,6 +224,9 @@ LEVER_COMPANIES = {
     "hermeus":    "Hermeus",
     "wealthfront": "Wealthfront",
     "angellist":  "AngelList",
+    # Added from a large user-supplied company list (live-verified as above).
+    "immuta":     "Immuta",
+    "zeiss":      "Zeiss",
 }
 
 # Ashby HQ: https://api.ashbyhq.com/posting-api/job-board/{slug}
@@ -224,6 +274,25 @@ ASHBY_COMPANIES = {
     "langchain":    "LangChain",
     "llamaindex":   "LlamaIndex",
     "crusoe":       "Crusoe",
+    # Added from a large user-supplied company list (live-verified as above).
+    "altura":       "Altura Associates",
+    "aven":         "Aven",
+    "conductorai":  "ConductorAI",
+    "envoy":        "Envoy",
+    "exegy":        "Exegy",
+    "farsight":     "Farsight AI",
+    "firetiger":    "FireTiger",
+    "granica":      "Granica",
+    "illumio":      "Illumio",
+    "maxima":       "Maxima",
+    "mercor":       "Mercor",
+    "niural":       "Niural AI",
+    "retell-ai":    "Retell AI",
+    "revel":        "Revel",
+    "root-access":  "Root Access",
+    "sentry":       "Sentry",
+    "sphinx":       "Sphinx",
+    "voxel":        "Voxel Labs",
 }
 
 # Workday CXS API: POST https://{tenant}.{cluster}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
