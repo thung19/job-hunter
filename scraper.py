@@ -95,11 +95,33 @@ MARKDOWN_SOURCES = [
      "title_filter": False},
     {"url": "https://raw.githubusercontent.com/zapplyjobs/Internships-2027/main/README.md",
      "title_filter": True},
-    {"url": "https://raw.githubusercontent.com/negarprh/Canadian-Tech-Internships-2027/main/README.md",
-     "title_filter": True},
     {"url": "https://raw.githubusercontent.com/ApplyGuy/2027-Internships/main/README.md",
      "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/zapplyjobs/awesome-ml-internships-2027/main/README.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/idealjobapp/2026-Cyber-Security-Internship/main/README.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/idealjobapp/2026-Data-Science-Internship/main/README.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/idealjobapp/2026-Product-Management-Internship/main/README.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/idealjobapp/2026-AI-Internship/main/README.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/akarshkudrimoti/f500-swe-radar/main/README.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/ricsign/Ricsign-New-Grads-Jobs-2027/main/boards/INTERNSHIPS.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/ricsign/Ricsign-New-Grads-Jobs-2027/main/boards/QUANT.md",
+     "title_filter": False},
+    {"url": "https://raw.githubusercontent.com/ricsign/Ricsign-New-Grads-Jobs-2027/main/boards/AI_RESEARCH.md",
+     "title_filter": False},
 ]
+
+# JSON sources with their own field names (not the SimplifyJobs-style schema the
+# generic parse_json_source expects) - each gets a dedicated parser below.
+PYTHON3ISFUN_URL = "https://raw.githubusercontent.com/python3isfun/intern-jobs/main/data/listings.json"
+JERRYLIN23_URL = "https://raw.githubusercontent.com/jerrylin-23/North-America-internships/main/jobs-history.json"
+MICHAE1LM_URL = "https://raw.githubusercontent.com/michae1lm/Summer-2027-Internships-Jobs/main/opportunities.json"
 
 # Direct company career-page sources via public ATS APIs (no scraping required).
 # All slugs below are live-verified. To add a company: visit its job board URL
@@ -379,7 +401,13 @@ LINK_RE = re.compile(
 )
 TAG_RE = re.compile(r"<[^>]+>")
 SEPARATOR_CELL_RE = re.compile(r"^:?-{2,}:?$")
-US_LOCATION_RE = re.compile(
+# Full country/state names are matched case-insensitively; two-letter state codes
+# are matched CASE-SENSITIVE (uppercase only) and deliberately NOT combined into the
+# same case-insensitive pattern - "in"/"or"/"me"/"hi"/"ok"/"pa" are common English
+# words (e.g. "Remote in Canada") that would otherwise false-positive-match the state
+# codes IN/OR/ME/HI/OK/PA under IGNORECASE. Every source in practice writes genuine
+# state codes uppercase ("Austin, TX"), so requiring uppercase costs nothing real.
+US_LOCATION_TEXT_RE = re.compile(
     r"\b(?:united states|u\.s\.a?\.?|usa|us)\b"
     r"|\b(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|"
     r"delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|"
@@ -388,10 +416,33 @@ US_LOCATION_RE = re.compile(
     r"new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|"
     r"pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|"
     r"utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|"
-    r"district of columbia)\b"
-    r"|(?:^|[,/ -])(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|"
+    r"district of columbia)\b",
+    re.IGNORECASE,
+)
+US_STATE_ABBR_RE = re.compile(
+    r"(?:^|[,/ -])(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|"
     r"KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|"
-    r"PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)(?=$|[,/ -])",
+    r"PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)(?=$|[,/ -])"
+)
+
+
+def has_us_location_text(text: str) -> bool:
+    return bool(US_LOCATION_TEXT_RE.search(text) or US_STATE_ABBR_RE.search(text))
+
+# A "Remote" location alone doesn't mean US-remote - "Remote, Canada" / "Remote - UK"
+# must NOT pass. This is a denylist of common non-US country/region names and (for
+# Canada specifically, since several sources are Canada-focused) provinces/cities.
+NON_US_LOCATION_RE = re.compile(
+    r"\b(?:canada|ontario|quebec|qu[eé]bec|british columbia|alberta|manitoba|"
+    r"saskatchewan|nova scotia|new brunswick|toronto|vancouver|montreal|ottawa|"
+    r"calgary|edmonton|waterloo|winnipeg|mississauga|"
+    r"united kingdom|u\.k\.?|england|scotland|wales|london|"
+    r"india|bangalore|bengaluru|hyderabad|mumbai|pune|delhi|"
+    r"germany|berlin|munich|france|paris|ireland|dublin|netherlands|amsterdam|"
+    r"singapore|australia|sydney|melbourne|japan|tokyo|china|beijing|shanghai|"
+    r"mexico|brazil|switzerland|israel|spain|italy|sweden|poland|romania|"
+    r"ukraine|philippines|vietnam|malaysia|indonesia|egypt|nigeria|"
+    r"south africa|hong kong|taiwan|south korea|seoul)\b",
     re.IGNORECASE,
 )
 
@@ -624,6 +675,108 @@ def parse_csv_source(text: str) -> list[dict]:
     return results
 
 
+def parse_python3isfun_source(text: str) -> list[dict]:
+    """Parse python3isfun/intern-jobs' data/listings.json - own employer career-site
+    crawl, listings nested under a "listings" key, no unique id so dedupe on
+    apply_url (same "url:" key scheme as markdown sources, for cross-source dedupe)."""
+    results = []
+    data = json.loads(text)
+    items = data.get("listings") or []
+    dropped_kw = dropped_notintern = 0
+    for item in items:
+        title = item.get("title") or ""
+        if not is_relevant_title(title):
+            dropped_kw += 1
+            continue
+        if not is_intern_title(title):
+            dropped_notintern += 1
+            continue
+        url = item.get("apply_url") or ""
+        if not url:
+            continue
+        location = ", ".join(x for x in [item.get("city"), item.get("state")] if x)
+        if item.get("remote") and "remote" not in location.lower():
+            location = f"{location}, Remote".strip(", ")
+        results.append({
+            "key": f"url:{url}",
+            "company": item.get("company") or "Unknown",
+            "title": title,
+            "location": location,
+            "url": url,
+        })
+    log(f"  parsed {len(items)} listings -> kept {len(results)} "
+        f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern)", "PARSE")
+    return results
+
+
+def parse_jerrylin23_source(text: str) -> list[dict]:
+    """Parse jerrylin-23/North-America-internships' jobs-history.json - own
+    Greenhouse/Lever/Ashby polling of a curated company registry, flat array."""
+    results = []
+    items = json.loads(text)
+    if not isinstance(items, list):
+        items = []
+    dropped_kw = dropped_notintern = dropped_inactive = 0
+    for item in items:
+        status = (item.get("status") or "").strip().lower()
+        if status and status != "active":
+            dropped_inactive += 1
+            continue
+        title = item.get("title") or ""
+        if not is_relevant_title(title):
+            dropped_kw += 1
+            continue
+        if not is_intern_title(title):
+            dropped_notintern += 1
+            continue
+        url = item.get("url") or ""
+        if not url:
+            continue
+        results.append({
+            "key": f"url:{url}",
+            "company": item.get("company") or "Unknown",
+            "title": title,
+            "location": item.get("location") or "",
+            "url": url,
+        })
+    log(f"  parsed {len(items)} listings -> kept {len(results)} "
+        f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern, "
+        f"{dropped_inactive} inactive)", "PARSE")
+    return results
+
+
+def parse_michae1lm_source(text: str) -> list[dict]:
+    """Parse michae1lm/Summer-2027-Internships-Jobs' opportunities.json - uses
+    "role"/"application_url"/"job_id" instead of "title"/"url"/"id"."""
+    results = []
+    items = json.loads(text)
+    if not isinstance(items, list):
+        items = []
+    dropped_kw = dropped_notintern = 0
+    for item in items:
+        title = item.get("role") or ""
+        if not is_relevant_title(title):
+            dropped_kw += 1
+            continue
+        if not is_intern_title(title):
+            dropped_notintern += 1
+            continue
+        url = item.get("application_url") or ""
+        if not url:
+            continue
+        job_id = item.get("job_id") or ""
+        results.append({
+            "key": f"m1lm:{job_id}" if job_id else f"url:{url}",
+            "company": item.get("company") or "Unknown",
+            "title": title,
+            "location": item.get("location") or "",
+            "url": url,
+        })
+    log(f"  parsed {len(items)} listings -> kept {len(results)} "
+        f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern)", "PARSE")
+    return results
+
+
 def is_relevant_title(title: str) -> bool:
     """Return True only for titles that are both software-relevant and intern/co-op."""
     t = (title or "").lower()
@@ -642,13 +795,19 @@ def is_intern_title(title: str) -> bool:
 
 
 def is_us_or_remote(location: str) -> bool:
-    """Return True for remote roles or locations explicitly identified as US."""
+    """Return True for remote roles or locations explicitly identified as US.
+    A bare "Remote" does NOT count if the same location string names a non-US
+    country/region (e.g. "Remote, Canada", "Remote - UK") - only accept it as
+    remote if there's no such signal, or the location also names a US place."""
     normalized = (location or "").strip()
     if not normalized:
         return False
-    if re.search(r"\bremote\b", normalized, re.IGNORECASE):
+    is_us = has_us_location_text(normalized)
+    if is_us:
         return True
-    return bool(US_LOCATION_RE.search(normalized))
+    if re.search(r"\bremote\b", normalized, re.IGNORECASE):
+        return not NON_US_LOCATION_RE.search(normalized)
+    return False
 
 
 def is_direct_job_url(url: str) -> bool:
@@ -957,7 +1116,7 @@ def send_email(postings: list[dict]) -> None:
 
 def gather_listings() -> list[dict]:
     listings: list[dict] = []
-    total = (len(JSON_SOURCES) + len(MARKDOWN_SOURCES) + len(CSV_SOURCES)
+    total = (len(JSON_SOURCES) + len(MARKDOWN_SOURCES) + len(CSV_SOURCES) + 3
              + len(GREENHOUSE_COMPANIES) + len(LEVER_COMPANIES)
              + len(ASHBY_COMPANIES) + len(WORKDAY_COMPANIES) + len(WORKABLE_COMPANIES))
     idx = 0
@@ -983,6 +1142,17 @@ def gather_listings() -> list[dict]:
             listings += parse_csv_source(fetch(url))
         except Exception as e:  # noqa: BLE001
             log(f"CSV source failed {url}: {e}", "WARN")
+    for url, parser in (
+        (PYTHON3ISFUN_URL, parse_python3isfun_source),
+        (JERRYLIN23_URL, parse_jerrylin23_source),
+        (MICHAE1LM_URL, parse_michae1lm_source),
+    ):
+        idx += 1
+        log(f"Source {idx}/{total} (JSON, custom schema): {url.split('/')[4]}", "SOURCE")
+        try:
+            listings += parser(fetch(url))
+        except Exception as e:  # noqa: BLE001
+            log(f"Custom JSON source failed {url}: {e}", "WARN")
     for slug, name in GREENHOUSE_COMPANIES.items():
         idx += 1
         log(f"Source {idx}/{total} (Greenhouse): {name}", "SOURCE")

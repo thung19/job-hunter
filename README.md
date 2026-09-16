@@ -12,9 +12,12 @@ machine of yours needs to be on.
   `zoneinfo("America/New_York")` to check whether the current Eastern hour is in
   `SEND_HOURS_ET` (8am-10pm, i.e. `{8, 9, ..., 22}`); outside that window it
   exits immediately. This tracks EST/EDT automatically.
-- **Sources:** three JSON feeds, twelve markdown-table READMEs, one CSV feed, and
-  direct public Greenhouse, Lever, Ashby, Workday, and Workable employer job boards —
-  187 sources in total (see `scraper.py`). Deliberately excludes Twitter/X and
+- **Sources:** three JSON feeds (plus three more with their own field schemas), twenty
+  markdown-table READMEs, one CSV feed, and direct public Greenhouse, Lever, Ashby,
+  Workday, and Workable employer job boards — 198 sources in total (see `scraper.py`).
+  US-only: locations are checked against a state/country allowlist plus a non-US
+  denylist so "Remote, Canada"-style postings don't slip through as if they were
+  US-remote. Deliberately excludes Twitter/X and
   Instagram: neither has a free, reliable API for this (X requires a paid enterprise
   tier; IG requires an authenticated session), scraping either would violate their
   ToS and get blocked fast from GitHub Actions' shared IP ranges, and personal
