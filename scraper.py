@@ -389,6 +389,35 @@ RELEVANT_KEYWORDS = [
     "quant", "quantitative", "algo trading", "algorithmic trading",
 ]
 
+# Non-software engineering disciplines that would otherwise slip through the broad
+# "engineer"/"engineering"/"technology" keywords above (e.g. "Structural Engineering
+# Intern", "Mechanical Engineer Co-op"). Checked as a hard exclusion - regardless of
+# category or keyword match - since these titles are never software/data/GTM roles
+# in practice on these sources.
+EXCLUDE_KEYWORDS = [
+    "mechanical engineer", "mechanical engineering", "structural engineer",
+    "structural engineering", "civil engineer", "civil engineering",
+    "chemical engineer", "chemical engineering", "industrial engineer",
+    "industrial engineering", "manufacturing engineer", "manufacturing engineering",
+    "process engineer", "process engineering", "materials engineer",
+    "materials engineering", "materials science", "mining engineer",
+    "petroleum engineer", "environmental engineer", "environmental engineering",
+    "automotive engineer", "aerospace engineer", "aerospace engineering",
+    "hvac", "plant engineer", "facilities engineer", "facilities engineering",
+    "welding engineer", "quality engineer", "quality engineering", "reliability engineer",
+    "maintenance engineer", "maintenance engineering", "construction engineer",
+    "construction engineering", "geotechnical", "surveying", "surveyor",
+]
+EXCLUDE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(kw) for kw in EXCLUDE_KEYWORDS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_excluded_title(title: str) -> bool:
+    return bool(EXCLUDE_RE.search(title or ""))
+
+
 # Matches badge-style [![alt](badge.svg)](url) links, plain markdown [text](url) links,
 # AND raw HTML <a href="url">text</a>. The badge-style alternative MUST come first: a
 # nested markdown image's own "]" would otherwise prematurely close the plain-link
@@ -602,6 +631,9 @@ def parse_json_source(text: str) -> list[dict]:
             dropped["inactive"] += 1
             continue
         title = item.get("title") or ""
+        if is_excluded_title(title):
+            dropped["category"] += 1
+            continue
         category = item.get("category")
         if category:
             # Structured category field -> filter on broader tech/data/GTM categories.
@@ -645,6 +677,9 @@ def parse_csv_source(text: str) -> list[dict]:
     for row in csv.DictReader(io.StringIO(text)):
         rows += 1
         title = row.get("title") or ""
+        if is_excluded_title(title):
+            dropped["category"] += 1
+            continue
         category = row.get("category") or ""
         if category:
             # Structured category column -> filter on the same broad tech/data/GTM
@@ -778,8 +813,11 @@ def parse_michae1lm_source(text: str) -> list[dict]:
 
 
 def is_relevant_title(title: str) -> bool:
-    """Return True only for titles that are both software-relevant and intern/co-op."""
+    """Return True only for titles that are both software-relevant and intern/co-op,
+    and not a non-software engineering discipline (mechanical, structural, etc.)."""
     t = (title or "").lower()
+    if is_excluded_title(t):
+        return False
     return bool(any(kw in t for kw in RELEVANT_KEYWORDS) and is_intern_title(t))
 
 
@@ -1009,6 +1047,27 @@ def parse_workable_source(text: str, account: str, company: str) -> list[dict]:
     log(f"  parsed {len(jobs)} jobs -> kept {len(results)} "
         f"(dropped {dropped_kw} non-relevant title, {dropped_notintern} non-intern)", "PARSE")
     return results
+
+
+# --------------------------------------------------------------------------- #
+# Fuzzy dedupe (company + title + location)
+# --------------------------------------------------------------------------- #
+
+# Same posting can reach us via two different sources with different IDs/URLs
+# (e.g. a jobright badge link vs. the employer's own ATS link) - the exact "key"
+# dedupe above won't catch that. This normalizes company/title/location into a
+# secondary key so those cross-source duplicates still collapse into one email.
+NON_ALNUM_RE = re.compile(r"[^a-z0-9 ]+")
+
+
+def normalize_text(text: str) -> str:
+    t = (text or "").lower()
+    t = NON_ALNUM_RE.sub(" ", t)
+    return " ".join(t.split())
+
+
+def fuzzy_key(company: str, title: str, location: str) -> str:
+    return f"ctl:{normalize_text(company)}|{normalize_text(title)}|{normalize_text(location)}"
 
 
 # --------------------------------------------------------------------------- #
@@ -1248,19 +1307,23 @@ def main(argv: list[str] | None = None) -> int:
     listings = gather_listings()
     log(f"Gathered {len(listings)} technology internship listings from all sources.")
 
-    # De-dupe within this batch as well as against history.
+    # De-dupe within this batch as well as against history. Each listing carries
+    # two keys - the source-native "key" and a normalized company+title+location
+    # "fuzzy_key" - either matching seen/the batch counts as a duplicate.
     new_postings = []
     batch_keys = set()
     dup_seen = dup_batch = 0
     for item in listings:
-        k = item["key"]
-        if k in seen:
+        item["fuzzy_key"] = fuzzy_key(item["company"], item["title"], item["location"])
+        k, fk = item["key"], item["fuzzy_key"]
+        if k in seen or fk in seen:
             dup_seen += 1
             continue
-        if k in batch_keys:
+        if k in batch_keys or fk in batch_keys:
             dup_batch += 1
             continue
         batch_keys.add(k)
+        batch_keys.add(fk)
         new_postings.append(item)
     log(f"Dedupe: {len(new_postings)} new, {dup_seen} already-seen, {dup_batch} intra-batch dupes.")
 
@@ -1280,6 +1343,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         for item in listings:
             seen.add(item["key"])
+            seen.add(item["fuzzy_key"])
         save_seen(seen)
         log(f"First run: recorded {len(seen)} existing postings without emailing.", "SEED")
         return 0
@@ -1305,6 +1369,7 @@ def main(argv: list[str] | None = None) -> int:
     send_email(new_postings)
     for item in new_postings:
         seen.add(item["key"])
+        seen.add(item["fuzzy_key"])
     save_seen(seen)
     log(f"Done. seen.json now has {len(seen)} keys.")
     return 0
