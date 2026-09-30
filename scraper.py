@@ -1070,6 +1070,60 @@ def fuzzy_key(company: str, title: str, location: str) -> str:
     return f"ctl:{normalize_text(company)}|{normalize_text(title)}|{normalize_text(location)}"
 
 
+# Workday serves one posting at many URLs (".../en-US/rec_rtx_ext_gateway/job/...",
+# ".../en-GB/REC_RTX_Ext_Gateway/job/...", no locale, a "-1" re-post suffix, ...) and
+# different feeds copy different ones, so neither the URL key nor the fuzzy key is
+# stable. The requisition id after the last "_" in the path is, so key on tenant+req.
+WORKDAY_HOST_RE = re.compile(r"https?://([a-z0-9-]+)\.wd\d+\.myworkdayjobs\.com/", re.I)
+WORKDAY_KEY_RE = re.compile(r"^(?:csv:)?workday:([^:]+):")
+# externalPath is /job/{location}/{title-slug}_{req id} (location occasionally absent);
+# the slug never contains "_".
+WORKDAY_REQ_RE = re.compile(r"/job/(?:[^/?#]+/)?[^/?#_]+_([^/?#]+)")
+WORKDAY_REPOST_SUFFIX_RE = re.compile(r"-\d{1,2}$")
+# zapply.jobs redirects: /l/d/workday-{tenant}-{site slug, lowercased}-{req id, original case}
+ZAPPLY_WORKDAY_RE = re.compile(r"zapply\.jobs/l/d/workday-([a-z0-9]+)-([^?#/]+)")
+
+
+def _zapply_req_id(rest: str) -> str | None:
+    """Split "{site slug}-{req id}". zapply lowercases the site slug but keeps the req
+    id's case, so the req id starts at the first token with a capital letter (req ids
+    can contain "-" themselves, e.g. "REQ-2026-17966"); all-numeric ids are the trailing
+    run of digit tokens."""
+    toks = rest.split("-")
+    start = next((i for i, t in enumerate(toks) if any(c.isupper() for c in t)), None)
+    if start is None:
+        start = len(toks)
+        while start > 1 and toks[start - 1].isdigit():
+            start -= 1
+        if start == len(toks):
+            return None
+    return "-".join(toks[start:])
+
+
+def workday_req_key(ref: str) -> str | None:
+    """Canonical "wd:{tenant}:{req id}" key from a Workday URL, a zapply.jobs Workday
+    redirect, or a workday:/csv:workday: listing key; None if ref isn't a Workday posting."""
+    if z := ZAPPLY_WORKDAY_RE.search(ref):
+        tenant, req_id = z.group(1), _zapply_req_id(z.group(2))
+    else:
+        t = WORKDAY_HOST_RE.search(ref) or WORKDAY_KEY_RE.match(ref)
+        r = WORKDAY_REQ_RE.search(ref)
+        tenant, req_id = (t.group(1), r.group(1)) if t and r else (None, None)
+    if not tenant or not req_id:
+        return None
+    req_id = WORKDAY_REPOST_SUFFIX_RE.sub("", req_id)
+    return f"wd:{tenant.lower()}:{req_id.lower()}"
+
+
+def dedupe_keys(item: dict) -> list[str]:
+    """Every key that identifies this listing; a match on any one means duplicate."""
+    keys = [item["key"], fuzzy_key(item["company"], item["title"], item["location"])]
+    wk = workday_req_key(item.get("url") or "") or workday_req_key(item["key"])
+    if wk:
+        keys.append(wk)
+    return keys
+
+
 # --------------------------------------------------------------------------- #
 # Seen-state persistence
 # --------------------------------------------------------------------------- #
@@ -1079,9 +1133,13 @@ def load_seen() -> set[str]:
         return set()
     try:
         data = json.loads(SEEN_FILE.read_text())
-        return set(data.get("seen", []))
     except (json.JSONDecodeError, ValueError):
         return set()
+    seen = set(data.get("seen", []))
+    # Older entries predate wd: keys - derive them so already-sent Workday postings
+    # aren't re-sent the first time they show up under a new URL variant.
+    seen |= {wk for k in seen if (wk := workday_req_key(k))}
+    return seen
 
 
 def save_seen(seen: set[str]) -> None:
@@ -1308,24 +1366,28 @@ def main(argv: list[str] | None = None) -> int:
     log(f"Gathered {len(listings)} technology internship listings from all sources.")
 
     # De-dupe within this batch as well as against history. Each listing carries
-    # two keys - the source-native "key" and a normalized company+title+location
-    # "fuzzy_key" - either matching seen/the batch counts as a duplicate.
+    # several keys (see dedupe_keys) - any one matching seen/the batch counts as a
+    # duplicate. When a listing is already seen, its other keys are recorded too, so
+    # the next URL variant of the same posting is caught even if we only knew it by
+    # e.g. a JSON feed id.
     new_postings = []
     batch_keys = set()
+    seen_aliases = set()
     dup_seen = dup_batch = 0
     for item in listings:
-        item["fuzzy_key"] = fuzzy_key(item["company"], item["title"], item["location"])
-        k, fk = item["key"], item["fuzzy_key"]
-        if k in seen or fk in seen:
+        item["dedupe_keys"] = keys = dedupe_keys(item)
+        if any(k in seen for k in keys):
             dup_seen += 1
+            seen_aliases.update(keys)
             continue
-        if k in batch_keys or fk in batch_keys:
+        if any(k in batch_keys for k in keys):
             dup_batch += 1
             continue
-        batch_keys.add(k)
-        batch_keys.add(fk)
+        batch_keys.update(keys)
         new_postings.append(item)
-    log(f"Dedupe: {len(new_postings)} new, {dup_seen} already-seen, {dup_batch} intra-batch dupes.")
+    seen_aliases -= seen
+    log(f"Dedupe: {len(new_postings)} new, {dup_seen} already-seen, {dup_batch} intra-batch dupes "
+        f"({len(seen_aliases)} new aliases for already-seen postings).")
 
     if not listings:
         log("No listings found from all sources; sending a no-results email.")
@@ -1342,8 +1404,7 @@ def main(argv: list[str] | None = None) -> int:
             log(f"[dry-run] Would seed {len(batch_keys)} postings without emailing.", "SEED")
             return 0
         for item in listings:
-            seen.add(item["key"])
-            seen.add(item["fuzzy_key"])
+            seen.update(item["dedupe_keys"])
         save_seen(seen)
         log(f"First run: recorded {len(seen)} existing postings without emailing.", "SEED")
         return 0
@@ -1355,6 +1416,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         send_email([])
         log("No-results email sent.")
+        if seen_aliases:
+            seen |= seen_aliases
+            save_seen(seen)
         return 0
 
     log(f"{len(new_postings)} new posting(s) to email:")
@@ -1367,9 +1431,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     send_email(new_postings)
+    seen |= seen_aliases
     for item in new_postings:
-        seen.add(item["key"])
-        seen.add(item["fuzzy_key"])
+        seen.update(item["dedupe_keys"])
     save_seen(seen)
     log(f"Done. seen.json now has {len(seen)} keys.")
     return 0
