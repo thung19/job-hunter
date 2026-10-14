@@ -389,16 +389,27 @@ RELEVANT_KEYWORDS = [
     "quant", "quantitative", "algo trading", "algorithmic trading",
 ]
 
+# Bare 2-letter abbreviations ("AI", "PM") that are common, legitimate standalone
+# titles (e.g. "AI Intern", "PM Intern") but are too short to safely substring-match
+# in RELEVANT_KEYWORDS above (plain "ai"/"pm" substrings would false-positive inside
+# unrelated words like "retail" or "campus"), so they get their own word-boundaried
+# regex instead.
+ABBREV_TITLE_RE = re.compile(r"\b(?:ai|pm)\b", re.IGNORECASE)
+
 # Non-software engineering disciplines that would otherwise slip through the broad
 # "engineer"/"engineering"/"technology" keywords above (e.g. "Structural Engineering
 # Intern", "Mechanical Engineer Co-op"). Checked as a hard exclusion - regardless of
 # category or keyword match - since these titles are never software/data/GTM roles
 # in practice on these sources.
 EXCLUDE_KEYWORDS = [
-    "mechanical engineer", "mechanical engineering", "structural engineer",
-    "structural engineering", "civil engineer", "civil engineering",
+    "mechanical engineer", "mechanical engineering", "mechanical systems",
+    "structural engineer", "structural engineering", "structural design",
+    "civil engineer", "civil engineering", "bridge engineer", "bridge engineering",
+    "bridge design",
     "chemical engineer", "chemical engineering", "industrial engineer",
     "industrial engineering", "manufacturing engineer", "manufacturing engineering",
+    "manufacturing technician", "manufacturing intern", "manufacturing co-op",
+    "production engineer", "production engineering",
     "process engineer", "process engineering", "materials engineer",
     "materials engineering", "materials science", "mining engineer",
     "petroleum engineer", "environmental engineer", "environmental engineering",
@@ -407,6 +418,19 @@ EXCLUDE_KEYWORDS = [
     "welding engineer", "quality engineer", "quality engineering", "reliability engineer",
     "maintenance engineer", "maintenance engineering", "construction engineer",
     "construction engineering", "geotechnical", "surveying", "surveyor",
+    # Electrical/electronics/ECE hardware disciplines - distinct from the software-
+    # adjacent "firmware"/"embedded software"/"computer engineer" roles that stay in
+    # RELEVANT_KEYWORDS.
+    "electrical engineer", "electrical engineering", "electronics engineer",
+    "electronics engineering", "hardware engineer", "hardware engineering",
+    "rf engineer", "analog design engineer", "analog engineer", "asic engineer",
+    "asic design", "fpga engineer", "pcb design", "pcb engineer", "circuit design",
+    "power electronics", "semiconductor engineer", "semiconductor process",
+    "vlsi",
+    # Graduate-only (MS/PhD) research roles - not open to undergrads. Titles with
+    # a bare "PhD" are always graduate-only in practice (e.g. "Research Intern
+    # (PhD)", "Applied Scientist Intern, PhD"), so match it unqualified.
+    "phd", "ph.d", "doctoral", "doctorate",
 ]
 EXCLUDE_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(kw) for kw in EXCLUDE_KEYWORDS) + r")\b",
@@ -818,7 +842,8 @@ def is_relevant_title(title: str) -> bool:
     t = (title or "").lower()
     if is_excluded_title(t):
         return False
-    return bool(any(kw in t for kw in RELEVANT_KEYWORDS) and is_intern_title(t))
+    is_relevant = any(kw in t for kw in RELEVANT_KEYWORDS) or ABBREV_TITLE_RE.search(t)
+    return bool(is_relevant and is_intern_title(t))
 
 
 # Matches internship / co-op titles. Word-boundaried so "Internal Audit" and
